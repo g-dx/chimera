@@ -16,7 +16,7 @@ import (
 var decodeFunctions map[rune]func([]byte) (interface{}, []byte)
 
 const (
-	TYPE_TERMINATOR rune       = 'e'
+	TYPE_TERMINATOR       rune = 'e'
 	BYTE_STRING_SEPARATOR rune = ':'
 )
 
@@ -54,8 +54,8 @@ func decodeList(buf []byte) (interface{}, []byte) {
 
 	// Drop leading 'l' and consume until terminating character
 	buf = buf[1:]
-	for c := nextChar(buf); c != TYPE_TERMINATOR; c = nextChar(buf) {
-		v, buf = decodeFunctions[c](buf)
+	for r := nextRune(buf); r != TYPE_TERMINATOR; r = nextRune(buf) {
+		v, buf = decoderFn(r)(buf)
 		list = append(list, v)
 	}
 
@@ -69,9 +69,9 @@ func decodeDictionary(buf []byte) (interface{}, []byte) {
 
 	// Drop leading 'd' and consume until terminating character
 	buf = buf[1:]
-	for c := nextChar(buf); c != TYPE_TERMINATOR; c = nextChar(buf) {
+	for r := nextRune(buf); r != TYPE_TERMINATOR; r = nextRune(buf) {
 		k, buf = decodeByteString(buf)
-		v, buf = decodeFunctions[nextChar(buf)](buf)
+		v, buf = decoderFn(nextRune(buf))(buf)
 		dict[k.(string)] = v
 	}
 
@@ -91,7 +91,7 @@ func Decode(buf []byte) (v interface{}, err error) {
 	}()
 
 	// Decode & check all data processed
-	v, buf = decodeFunctions[nextChar(buf)](buf)
+	v, buf = decoderFn(nextRune(buf))(buf)
 	if len(buf) != 0 {
 		panic(errors.New("Trailing data detected: " + string(buf)))
 	}
@@ -99,8 +99,16 @@ func Decode(buf []byte) (v interface{}, err error) {
 	return v, nil
 }
 
-func nextChar(buf []byte) rune {
+func nextRune(buf []byte) rune {
 	return rune(buf[0])
+}
+
+func decoderFn(r rune) func([]byte) (interface{}, []byte) {
+	fn := decodeFunctions[r]
+	if fn == nil {
+		panic(errors.New(fmt.Sprint("No decoding function found for character: %s", r)))
+	}
+	return fn
 }
 
 // Build function map
