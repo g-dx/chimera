@@ -16,8 +16,8 @@ import (
 var decodeFunctions map[rune]func([]byte) (interface{}, []byte)
 
 const (
-  TYPE_TERMINATOR rune = 'e'
-  BYTE_STRING_SEPARATOR rune = ':'
+	TYPE_TERMINATOR rune       = 'e'
+	BYTE_STRING_SEPARATOR rune = ':'
 )
 
 func decodeInteger(buf []byte) (interface{}, []byte) {
@@ -79,8 +79,8 @@ func decodeDictionary(buf []byte) (interface{}, []byte) {
 }
 
 func Decode(buf []byte) (v interface{}, err error) {
-    
-    // Recover from any decoding panics & return error
+
+	// Recover from any decoding panics & return error
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(runtime.Error); ok {
