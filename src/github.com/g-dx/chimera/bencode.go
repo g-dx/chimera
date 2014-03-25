@@ -71,7 +71,7 @@ func decodeByteString(buf []byte) (interface{}, []byte) {
 
 func decodeList(buf []byte) (interface{}, []byte) {
 
-	list := make([]interface{}, 10)
+	list := make([]interface{}, 0, 10)
 	var v interface{}
 
 	// Drop leading 'l' and consume until terminating character
