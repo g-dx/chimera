@@ -10,7 +10,7 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"time"
-	"crypto/sha1"
+	sha1Hash "crypto/sha1"
 )
 
 // Function map for decoding
@@ -20,6 +20,26 @@ const (
 	TYPE_TERMINATOR       rune = 'e'
 	BYTE_STRING_SEPARATOR rune = ':'
 )
+
+func Decode(buf []byte) (v interface{}, err error) {
+
+	// Recover from any decoding panics & return error
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(runtime.Error); ok {
+				panic(r)
+			}
+			err = r.(error)
+		}
+	}()
+
+	// Decode & check all data processed
+	v, remainingBuf := decoderFn(nextRune(buf))(buf)
+	if len(remainingBuf) != 0 {
+		panic(errors.New("Trailing data detected: " + string(remainingBuf)))
+	}
+	return v, nil
+}
 
 func decodeInteger(buf []byte) (interface{}, []byte) {
 
@@ -77,36 +97,19 @@ func decodeDictionary(buf []byte) (interface{}, []byte) {
 		dict[k.(string)] = v
 
 		// SPECIAL CASE:
-		// Any dictionary key named "info" gets a hash of its value added to
-		// the result
+		// Any dictionary key named "info" gets a SHA-1 hash of its value added to the result
 		if k.(string) == "info" {
-			infoBuf := preValueBuf[0:len(preValueBuf)-len(buf)]
-			dict["info_hash"] = sha1.New().Sum(infoBuf)
+			dict["info_hash"] = sha1(preValueBuf[0:len(preValueBuf)-len(buf)])
 		}
 	}
 
 	return dict, buf[1:]
 }
 
-
-func Decode(buf []byte) (v interface{}, err error) {
-
-	// Recover from any decoding panics & return error
-	defer func() {
-		if r := recover(); r != nil {
-			if _, ok := r.(runtime.Error); ok {
-				panic(r)
-			}
-			err = r.(error)
-		}
-	}()
-
-	// Decode & check all data processed
-	v, remainingBuf := decoderFn(nextRune(buf))(buf)
-	if len(remainingBuf) != 0 {
-		panic(errors.New("Trailing data detected: " + string(remainingBuf)))
-	}
-	return v, nil
+func sha1(buf []byte) []byte {
+	hash := sha1Hash.New()
+	hash.Write(buf) // Guaranteed not to return an error
+	return hash.Sum(nil)
 }
 
 func nextRune(buf []byte) rune {
