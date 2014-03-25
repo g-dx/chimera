@@ -10,6 +10,7 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"time"
+	"crypto/sha1"
 )
 
 // Function map for decoding
@@ -66,17 +67,27 @@ func decodeDictionary(buf []byte) (interface{}, []byte) {
 
 	dict := make(map[string]interface{})
 	var k, v interface{}
+	var preValueBuf []byte
 
 	// Drop leading 'd' and consume until terminating character
 	buf = buf[1:]
 	for r := nextRune(buf); r != TYPE_TERMINATOR; r = nextRune(buf) {
-		k, buf = decodeByteString(buf)
-		v, buf = decoderFn(nextRune(buf))(buf)
+		k, preValueBuf = decodeByteString(buf)
+		v, buf = decoderFn(nextRune(preValueBuf))(preValueBuf)
 		dict[k.(string)] = v
+
+		// SPECIAL CASE:
+		// Any dictionary key named "info" gets a hash of its value added to
+		// the result
+		if k.(string) == "info" {
+			infoBuf := preValueBuf[0:len(preValueBuf)-len(buf)]
+			dict["info_hash"] = sha1.New().Sum(infoBuf)
+		}
 	}
 
 	return dict, buf[1:]
 }
+
 
 func Decode(buf []byte) (v interface{}, err error) {
 
@@ -91,11 +102,10 @@ func Decode(buf []byte) (v interface{}, err error) {
 	}()
 
 	// Decode & check all data processed
-	v, buf = decoderFn(nextRune(buf))(buf)
-	if len(buf) != 0 {
-		panic(errors.New("Trailing data detected: " + string(buf)))
+	v, remainingBuf := decoderFn(nextRune(buf))(buf)
+	if len(remainingBuf) != 0 {
+		panic(errors.New("Trailing data detected: " + string(remainingBuf)))
 	}
-
 	return v, nil
 }
 
