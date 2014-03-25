@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 	sha1Hash "crypto/sha1"
+	"encoding/json"
 )
 
 // Function map for decoding
@@ -169,11 +170,13 @@ func main() {
 		fmt.Println(err)
 	}
 
-	_, err = Decode(buf)
+	data, err := Decode(buf)
 	if err != nil {
 		fmt.Println("Error: ", err)
+		return
 	}
-	fmt.Printf("Duration: %s\n", time.Since(now))
-	//  fmt.Printf("Content: %s\n", content)
 
+	fmt.Printf("Duration: %s\n", time.Since(now))
+	p, err := json.MarshalIndent(data, "", " ")
+	fmt.Printf("Decoded Data:\n%v", string(p))
 }
