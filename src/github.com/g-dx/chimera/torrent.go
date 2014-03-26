@@ -4,7 +4,10 @@ import (
 	"runtime"
 	"errors"
 	"fmt"
-	"strings"
+)
+
+const (
+	SHA1_LENGTH = 20
 )
 
 type MetaInfo struct {
@@ -48,22 +51,20 @@ func NewMetaInfo(entries map[string] interface {}) (mi *MetaInfo, err error) {
 		PieceLength:  i(d(entries, "info"), "piece length"),
 		Hashes:       toSha1Hashes(bs(d(entries, "info"), "pieces")),
 		Private:	  optI(d(entries, "info"), "private") != 0,
-		Files:		  toFiles(d(entries, "info")),
+		Files:		  toMetaInfoFiles(d(entries, "info")),
 		InfoHash:	  []byte(bs(entries, "info_hash")),
 	}
 
 	return mi, nil
 }
 
-func toFiles(info map[string]interface{}) []MetaInfoFile {
+func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 
 	name := bs(info, "name")
-
-	// Which mode are we in?
 	files := optL(info, "files")
-	if files == nil {
 
-		// Single-file mode
+	// Single-file mode
+	if files == nil {
 		return []MetaInfoFile{
 			MetaInfoFile {
 				Path:	  name,
@@ -73,38 +74,36 @@ func toFiles(info map[string]interface{}) []MetaInfoFile {
 	}
 
 	// Multi-file mode
-	infoFiles := make([]MetaInfoFile, 0, len(files))
-	for _, f := range files {
-		fs := f.(map[string]interface{})
-		infoFiles = append(infoFiles,
+	miFiles := make([]MetaInfoFile, 0, len(files))
+	for _, entry := range files {
+
+		// All entries in files list are dictionarys which describe each file
+		miFile := entry.(map[string]interface{})
+
+		miFiles = append(miFiles,
 			MetaInfoFile {
-				Path:	  name + strings.Join(l(fs, "path"), "/"),
-				Length:	  i(fs, "length"),
-				CheckSum: []byte(optBs(fs, "md5sum")),
+				Path:	  name + joinStrings(l(miFile, "path"), "/"),
+				Length:	  i(miFile, "length"),
+				CheckSum: []byte(optBs(miFile, "md5sum")),
 			})
 	}
 
-	return infoFiles
+	return miFiles
 }
 
 func toSha1Hashes(pieces string) [][]byte {
-	hashes := make([][]byte, 0, len(pieces)/20)
+	hashes := make([][]byte, 0, len(pieces)/SHA1_LENGTH)
 	buf := []byte(pieces)
 	for len(buf) != 0 {
-		hashes = append(hashes, buf[:20])
-		buf = buf[20:]
+		hashes = append(hashes, buf[:SHA1_LENGTH])
+		buf = buf[SHA1_LENGTH:]
 	}
 	return hashes
 }
 
-func bs(entries map[string] interface{}, key string) (string) {
-
-	v, ok := entries[key]
-	if !ok {
-		panic(errors.New(fmt.Sprintf("String (%v) not found.", key)))
-	}
-	fmt.Printf("%v => %v", key, v)
-	return v.(string)
+func joinStrings(list []interface {}, separator string) string {
+	// TODO: Implement me!
+	return "";
 }
 
 func optBs(entries map[string] interface {}, key string) (string) {
@@ -134,11 +133,20 @@ func optL(entries map[string] interface {}, key string) ([]interface {}) {
 	return v.([]interface {})
 }
 
+func bs(entries map[string] interface{}, key string) (string) {
+
+	v, ok := entries[key]
+	if !ok {
+		panic(errors.New(fmt.Sprintf("Mandatory bytestring (%v) not found.", key)))
+	}
+	return v.(string)
+}
+
 func l(entries map[string] interface {}, key string) ([]interface {}) {
 
 	v, ok := entries[key]
 	if !ok {
-		panic(errors.New(fmt.Sprintf("List (%v) not found.", key)))
+		panic(errors.New(fmt.Sprintf("Mandatory list (%v) not found.", key)))
 	}
 	return v.([]interface {})
 }
@@ -147,7 +155,7 @@ func i(entries map[string] interface {}, key string) (int64) {
 
 	v, ok := entries[key]
 	if !ok {
-		panic(errors.New(fmt.Sprintf("Integer (%v) not found.", key)))
+		panic(errors.New(fmt.Sprintf("Mandatory integer (%v) not found.", key)))
 	}
 	return v.(int64)
 }
@@ -156,7 +164,7 @@ func d(entries map[string] interface {}, key string) (map[string] interface {}) 
 
 	v, ok := entries[key]
 	if !ok {
-		panic(errors.New(fmt.Sprintf("Dict (%v) not found.", key)))
+		panic(errors.New(fmt.Sprintf("Mandatory dictionary (%v) not found.", key)))
 	}
 	return v.(map[string] interface {})
 }
