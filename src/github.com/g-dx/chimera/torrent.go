@@ -25,6 +25,7 @@ type MetaInfo struct {
 
 type MetaInfoFile struct {
 	Path string
+	Name string
 	Length int64
 	CheckSum []byte
 }
@@ -67,7 +68,8 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 	if files == nil {
 		return []MetaInfoFile{
 			MetaInfoFile {
-				Path:	  name,
+				Path:	  "/",
+				Name:	  name,
 				Length:	  i(info, "length"),
 				CheckSum: []byte(optBs(info, "md5sum")),
 			}}
@@ -79,10 +81,11 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 
 		// All entries in files list are dictionarys which describe each file
 		miFile := entry.(map[string]interface{})
-
+		path := l(miFile, "path")
 		miFiles = append(miFiles,
 			MetaInfoFile {
-				Path:	  name + joinStrings(l(miFile, "path"), "/"),
+				Path:	  name + "/" + joinStrings(path[:len(path-1)], "/") + "/",
+				Name:	  path[len(path-1)].(string),
 				Length:	  i(miFile, "length"),
 				CheckSum: []byte(optBs(miFile, "md5sum")),
 			})
