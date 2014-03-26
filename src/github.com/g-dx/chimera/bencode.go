@@ -5,13 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"runtime"
-	"runtime/pprof"
 	"strconv"
-	"time"
 	sha1Hash "crypto/sha1"
-	"encoding/json"
+	"io"
 )
 
 // Function map for decoding
@@ -22,7 +19,7 @@ const (
 	BYTE_STRING_SEPARATOR rune = ':'
 )
 
-func Decode(buf []byte) (v interface{}, err error) {
+func Decode(r io.Reader) (v interface{}, err error) {
 
 	// Recover from any decoding panics & return error
 	defer func() {
@@ -33,6 +30,12 @@ func Decode(buf []byte) (v interface{}, err error) {
 			err = r.(error)
 		}
 	}()
+
+	// Read bytes
+	buf, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
 
 	// Decode & check all data processed
 	v, remainingBuf := decoderFn(nextRune(buf))(buf)
@@ -100,7 +103,7 @@ func decodeDictionary(buf []byte) (interface{}, []byte) {
 		// SPECIAL CASE:
 		// Any dictionary key named "info" gets a SHA-1 hash of its value added to the result
 		if k.(string) == "info" {
-			dict["info_hash"] = sha1(preValueBuf[0:len(preValueBuf)-len(buf)])
+			dict["info_hash"] = string(sha1(preValueBuf[0:len(preValueBuf)-len(buf)]))
 		}
 	}
 
@@ -143,40 +146,4 @@ func init() {
 		'8': decodeByteString,
 		'9': decodeByteString,
 	}
-}
-
-func main() {
-
-	cpu, err := os.Create("/Users/Dakeyras/Desktop/bencode.cpuprofile")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	mem, err := os.Create("/Users/Dakeyras/Desktop/bencode.memprofile")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	pprof.StartCPUProfile(cpu)
-	pprof.WriteHeapProfile(mem)
-	defer pprof.StopCPUProfile()
-	defer cpu.Close()
-	defer mem.Close()
-
-	now := time.Now()
-	buf, err := ioutil.ReadFile("/Users/Dakeyras/Downloads/The Chris Gethard Show - Episodes 1 - 120   Specials.torrent")
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	data, err := Decode(buf)
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-
-	fmt.Printf("Duration: %s\n", time.Since(now))
-	p, err := json.MarshalIndent(data, "", " ")
-	fmt.Printf("Decoded Data:\n%v", string(p))
 }
