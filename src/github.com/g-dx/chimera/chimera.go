@@ -58,4 +58,3 @@ func main() {
 		p, err := json.MarshalIndent(metaInfo, "", " ")
 		fmt.Printf("Decoded Data:\n%v", string(p))
 }
-
