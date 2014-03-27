@@ -57,4 +57,18 @@ func main() {
 	}
 		p, err := json.MarshalIndent(metaInfo, "", " ")
 		fmt.Printf("Decoded Data:\n%v", string(p))
+
+	//
+	params := bittorrent.TrackerParameters{}
+	params.Params = make(map[string] string)
+	params.InfoHash(metaInfo.InfoHash)
+	params.NumWanted(10)
+	params.PeerId("Chimera")
+	url := bittorrent.BuildRequestUrl(metaInfo.Announce, params)
+	fmt.Println("Url: ", url)
+
+//	_, err = bittorrent.Request(url)
+//	if err != nil {
+//		fmt.Println("Error: ", err)
+//	}
 }
