@@ -95,6 +95,12 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 }
 
 func toSha1Hashes(pieces string) [][]byte {
+
+	// Check format/length
+	if len(pieces) % SHA1_LENGTH != 0 {
+		panic(errors.New(fmt.Sprintf("pieces value is malformed.")))
+	}
+
 	hashes := make([][]byte, 0, len(pieces)/SHA1_LENGTH)
 	buf := []byte(pieces)
 	for len(buf) != 0 {
