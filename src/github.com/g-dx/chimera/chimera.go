@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"time"
 //	"encoding/json"
+	"encoding/json"
 )
 
 type test struct {
@@ -46,14 +47,13 @@ func main() {
 	}
 
 	fmt.Printf("Duration: %s\n", time.Since(now))
-//	p, err := json.MarshalIndent(data, "", " ")
-//	fmt.Printf("Decoded Data:\n%v", string(p))
 
 	metaInfo, err := NewMetaInfo(data.(map[string] interface {}))
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
 	}
-	fmt.Println("", metaInfo)
+		p, err := json.MarshalIndent(metaInfo, "", " ")
+		fmt.Printf("Decoded Data:\n%v", string(p))
 }
 

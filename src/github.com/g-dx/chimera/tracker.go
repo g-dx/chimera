@@ -1,4 +1,4 @@
-package chimera
+package main
 
 import (
 	"net"
@@ -21,14 +21,15 @@ func Request(url string, port int, numWanted int) Response {
 
 	// Read response
 	conn.SetReadDeadline(time.Now().Add(time.Second * 10)) // timeout
-	response, err := ioutil.ReadAll(conn)
+	_, err = ioutil.ReadAll(conn)
 	if err != nil {
 		// TODO: Return empty response?
 	}
 
 	// Parse response
+	return Response{}
 }
 
 func buildUrl() string {
-
+	return ""
 }
