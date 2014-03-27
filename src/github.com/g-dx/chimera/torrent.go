@@ -84,8 +84,8 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 		path := l(miFile, "path")
 		miFiles = append(miFiles,
 			MetaInfoFile {
-				Path:	  name + "/" + joinStrings(path[:len(path-1)], "/") + "/",
-				Name:	  path[len(path-1)].(string),
+				Path:	  name + "/" + joinStrings(path[:len(path)-1], "/"),
+				Name:	  path[len(path)-1].(string),
 				Length:	  i(miFile, "length"),
 				CheckSum: []byte(optBs(miFile, "md5sum")),
 			})
@@ -105,12 +105,15 @@ func toSha1Hashes(pieces string) [][]byte {
 }
 
 func joinStrings(list []interface {}, separator string) string {
-	// TODO: Implement me!
-	return "";
+	buf := ""
+	for _, s := range list {
+		buf += s.(string) + separator
+	}
+
+	return buf
 }
 
 func optBs(entries map[string] interface {}, key string) (string) {
-
 	v, ok := entries[key]
 	if !ok {
 		return ""
