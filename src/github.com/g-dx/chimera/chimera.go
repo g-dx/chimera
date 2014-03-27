@@ -9,6 +9,8 @@ import (
 	"time"
 //	"encoding/json"
 	"encoding/json"
+	"github.com/g-dx/chimera/bittorrent"
+	"github.com/g-dx/chimera/bencode"
 )
 
 type test struct {
@@ -40,7 +42,7 @@ func main() {
 		fmt.Println(err)
 	}
 
-	data, err := Decode(bytes.NewReader(buf))
+	data, err := bencode.Decode(bytes.NewReader(buf))
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
@@ -48,7 +50,7 @@ func main() {
 
 	fmt.Printf("Duration: %s\n", time.Since(now))
 
-	metaInfo, err := NewMetaInfo(data.(map[string] interface {}))
+	metaInfo, err := bittorrent.NewMetaInfo(data.(map[string] interface {}))
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return

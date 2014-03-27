@@ -1,4 +1,4 @@
-package main
+package bencode
 
 import (
 	"bytes"
@@ -15,8 +15,8 @@ import (
 var decodeFunctions map[rune]func([]byte) (interface{}, []byte)
 
 const (
-	TYPE_TERMINATOR       rune = 'e'
-	BYTE_STRING_SEPARATOR rune = ':'
+	typeTerminator      rune = 'e'
+	byteStringSeparator rune = ':'
 )
 
 func Decode(r io.Reader) (v interface{}, err error) {
@@ -48,7 +48,7 @@ func Decode(r io.Reader) (v interface{}, err error) {
 func decodeInteger(buf []byte) (interface{}, []byte) {
 
 	// Check for terminating character
-	i := bytes.IndexRune(buf, TYPE_TERMINATOR)
+	i := bytes.IndexRune(buf, typeTerminator)
 	if i == -1 {
 		panic(errors.New("Failed to decode integer as no ending 'e' found"))
 	}
@@ -61,7 +61,7 @@ func decodeInteger(buf []byte) (interface{}, []byte) {
 func decodeByteString(buf []byte) (interface{}, []byte) {
 
 	// Check for terminating character
-	i := bytes.IndexRune(buf, BYTE_STRING_SEPARATOR)
+	i := bytes.IndexRune(buf, byteStringSeparator)
 	if i == -1 {
 		panic(errors.New("Failed to decode byte string as no terminating ':' found"))
 	}
@@ -79,7 +79,7 @@ func decodeList(buf []byte) (interface{}, []byte) {
 
 	// Drop leading 'l' and consume until terminating character
 	buf = buf[1:]
-	for r := nextRune(buf); r != TYPE_TERMINATOR; r = nextRune(buf) {
+	for r := nextRune(buf); r != typeTerminator; r = nextRune(buf) {
 		v, buf = decoderFn(r)(buf)
 		list = append(list, v)
 	}
@@ -95,7 +95,7 @@ func decodeDictionary(buf []byte) (interface{}, []byte) {
 
 	// Drop leading 'd' and consume until terminating character
 	buf = buf[1:]
-	for r := nextRune(buf); r != TYPE_TERMINATOR; r = nextRune(buf) {
+	for r := nextRune(buf); r != typeTerminator; r = nextRune(buf) {
 		k, preValueBuf = decodeByteString(buf)
 		v, buf = decoderFn(nextRune(preValueBuf))(preValueBuf)
 		dict[k.(string)] = v
