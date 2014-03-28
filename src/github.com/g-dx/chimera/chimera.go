@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"bytes"
 	"time"
-//	"encoding/json"
 	"encoding/json"
 	"github.com/g-dx/chimera/bittorrent"
 	"github.com/g-dx/chimera/bencode"
@@ -42,7 +41,7 @@ func main() {
 		fmt.Println(err)
 	}
 
-	data, err := bencode.Decode(bytes.NewReader(buf))
+	data, err := bencode.DecodeAsDict(bytes.NewReader(buf))
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
@@ -50,22 +49,31 @@ func main() {
 
 	fmt.Printf("Duration: %s\n", time.Since(now))
 
-	metaInfo, err := bittorrent.NewMetaInfo(data.(map[string] interface {}))
+	metaInfo, err := bittorrent.NewMetaInfo(data)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
 	}
-		p, err := json.MarshalIndent(metaInfo, "", " ")
-		fmt.Printf("Decoded Data:\n%v", string(p))
+	_, err = json.MarshalIndent(metaInfo, "", " ")
+	fmt.Printf("Decoded Data:\n%v\n", "skipped")
 
-	//
-	params := bittorrent.TrackerParameters{}
-	params.Params = make(map[string] string)
-	params.InfoHash(metaInfo.InfoHash)
-	params.NumWanted(10)
-	params.PeerId("Chimera")
-	url := bittorrent.BuildRequestUrl(metaInfo.Announce, params)
-	fmt.Println("Url: ", url)
+	// Create request
+	req := &bittorrent.TrackerRequest{
+		Url : metaInfo.Announce,
+		InfoHash : metaInfo.InfoHash,
+		PeerId : "Chimera",
+		NumWanted : 10,
+	}
+
+	reqJson, err := json.MarshalIndent(req, "", " ")
+	fmt.Printf("Params:%v\n", reqJson)
+
+	resp, err := bittorrent.QueryTracker(req, 10)
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+	fmt.Println("Url: ", resp)
 
 //	_, err = bittorrent.Request(url)
 //	if err != nil {

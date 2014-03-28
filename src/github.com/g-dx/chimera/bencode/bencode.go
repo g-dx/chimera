@@ -19,6 +19,22 @@ const (
 	byteStringSeparator rune = ':'
 )
 
+func DecodeAsDict(r io.Reader) (map[string]interface{}, error) {
+
+	// Decode and check for error
+	data, err := Decode(r)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check type
+	m, ok := data.(map[string] interface {})
+	if !ok {
+		return nil, errors.New("Supplied data is not a dictionary.")
+	}
+	return m, nil
+}
+
 func Decode(r io.Reader) (v interface{}, err error) {
 
 	// Recover from any decoding panics & return error
