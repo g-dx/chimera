@@ -41,19 +41,13 @@ func main() {
 		fmt.Println(err)
 	}
 
-	data, err := bencode.DecodeAsDict(bytes.NewReader(buf))
+	metaInfo, err := bittorrent.NewMetaInfo(bytes.NewReader(buf))
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
 	}
 
 	fmt.Printf("Duration: %s\n", time.Since(now))
-
-	metaInfo, err := bittorrent.NewMetaInfo(data)
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
 	_, err = json.MarshalIndent(metaInfo, "", " ")
 	fmt.Printf("Decoded Data:\n%v\n", "skipped")
 
