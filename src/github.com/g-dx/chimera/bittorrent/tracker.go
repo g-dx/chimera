@@ -14,8 +14,8 @@ import (
 // TODO: Consider consolidating all of these in one file
 const (
 	//	infoHash    = "info_hash"
-	numWanted   = "numWanted"
-	peerId      = "peerId"
+	numWanted   = "numwant"
+	peerId      = "peer_id"
 	minInterval = "min interval"
 	interval    = "interval"
 	failure     = "failure"
@@ -31,6 +31,13 @@ type TrackerRequest struct {
 type TrackerResponse struct {
 	Interval    int64
 	MinInterval int64
+	PeerAddresses []PeerAddress
+}
+
+type PeerAddress struct {
+	Id string
+	Ip string
+	Port uint
 }
 
 func QueryTracker(req *TrackerRequest, timeout time.Duration) (*TrackerResponse, error) {
@@ -56,8 +63,9 @@ func QueryTracker(req *TrackerRequest, timeout time.Duration) (*TrackerResponse,
 
 	// Parse response
 	return &TrackerResponse{
-		Interval : i(bdata, interval),
-		MinInterval : i(bdata, minInterval),
+		Interval 		: i(bdata, interval),
+		MinInterval 	: i(bdata, minInterval),
+		PeerAddresses 	: toPeerAddresses(bdata["peers"]),
 	}, nil
 
 }
@@ -77,4 +85,44 @@ func buildUrl(req *TrackerRequest) string {
 	}
 
 	return req.Url + "?" + strings.Join(pairs, "&")
+}
+
+func toPeerAddresses(v interface {}) []PeerAddress {
+
+	var peers
+	switch val:= v.(type) {
+
+	// Binary model
+	case string:
+
+		if len(val) % 6 != 0 {
+			panic(errors.New("peers value value is malformed."))
+		}
+
+		// Chop up list
+		peers = make([]PeerAddress, 0, len(val)/6)
+		for buf := []byte(val); len(buf) != 0; buf = buf[6:] {
+			peers = append(peers, PeerAddress{
+					Id : "unknown",
+					Ip : string(buf[:4]),
+					Port : uint(buf[4:6]),
+				})
+		}
+
+	// Dictionary model
+	case []map[string]interface{}:
+
+		peers = make([]PeerAddress, 0, len(val))
+		for dict, _ := range val {
+			peers = append(peers, PeerAddress {
+					Id : bs("peer id", val),
+					Ip : bs("ip", val),
+					Port: i("port" , val),
+				})
+		}
+	default:
+		panic(errors.New("Unknown type of peers value."))
+	}
+
+	return peers
 }
