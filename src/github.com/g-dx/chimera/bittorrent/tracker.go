@@ -106,7 +106,7 @@ func toPeerAddresses(v interface {}) []PeerAddress {
 		for buf := []byte(val); len(buf) != 0; buf = buf[6:] {
 			peers = append(peers, PeerAddress{
 					Id : "unknown",
-					Ip : fmt.Sprintf("%v.%v.%v.%v", buf[0], buf[1], buf[2], buf[3]),
+					Ip : fmt.Sprintf("%d.%d.%d.%d", buf[0], buf[1], buf[2], buf[3]),
 					Port : (uint(buf[4]) << 8 & 0xFF00) + uint(buf[5]),
 				})
 		}
