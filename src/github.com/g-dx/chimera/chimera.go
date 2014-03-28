@@ -9,7 +9,6 @@ import (
 	"time"
 	"encoding/json"
 	"github.com/g-dx/chimera/bittorrent"
-	"github.com/g-dx/chimera/bencode"
 )
 
 type test struct {
@@ -62,7 +61,7 @@ func main() {
 	reqJson, err := json.MarshalIndent(req, "", " ")
 	fmt.Printf("Params:%v\n", reqJson)
 
-	resp, err := bittorrent.QueryTracker(req, 10)
+	resp, err := bittorrent.QueryTracker(req)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return

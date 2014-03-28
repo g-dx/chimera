@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"errors"
 	"net/http"
+	"fmt"
 )
 
 // Request & response dictionary keys
@@ -54,6 +55,8 @@ func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
 		return nil, err
 	}
 
+	fmt.Println("", bdata)
+
 	// Check for failure
 	failure := optBs(bdata, failure)
 	if len(failure) > 0 {
@@ -88,7 +91,7 @@ func buildUrl(req *TrackerRequest) string {
 
 func toPeerAddresses(v interface {}) []PeerAddress {
 
-	var peers
+	var peers []PeerAddress
 	switch val:= v.(type) {
 
 	// Binary model
@@ -103,8 +106,8 @@ func toPeerAddresses(v interface {}) []PeerAddress {
 		for buf := []byte(val); len(buf) != 0; buf = buf[6:] {
 			peers = append(peers, PeerAddress{
 					Id : "unknown",
-					Ip : string(buf[:4]),
-					Port : uint(buf[4:6]),
+					Ip : fmt.Sprintf("%v.%v.%v.%v", buf[0], buf[1], buf[2], buf[3]),
+					Port : (uint(buf[4]) << 8 & 0xFF00) + uint(buf[5]),
 				})
 		}
 
@@ -112,11 +115,11 @@ func toPeerAddresses(v interface {}) []PeerAddress {
 	case []map[string]interface{}:
 
 		peers = make([]PeerAddress, 0, len(val))
-		for dict, _ := range val {
+		for _, dict := range val {
 			peers = append(peers, PeerAddress {
-					Id : bs("peer id", val),
-					Ip : bs("ip", val),
-					Port: i("port" , val),
+					Id : bs(dict, "peer id"),
+					Ip : bs(dict, "ip"),
+					Port: uint(i(dict, "port")),
 				})
 		}
 	default:
