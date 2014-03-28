@@ -1,76 +1,80 @@
 package bittorrent
 
 import (
-	"net"
 	"time"
 	"strings"
 	"net/url"
 	"github.com/g-dx/chimera/bencode"
+	"strconv"
+	"errors"
+	"net/http"
 )
 
-type TrackerParameters struct {
-	Params map[string] string
+// Request & response dictionary keys
+// TODO: Consider consolidating all of these in one file
+const (
+	//	infoHash    = "info_hash"
+	numWanted   = "numWanted"
+	peerId      = "peerId"
+	minInterval = "min interval"
+	interval    = "interval"
+	failure     = "failure"
+)
+
+type TrackerRequest struct {
+	Url       string
+	InfoHash  []byte
+	PeerId    string
+	NumWanted int64
 }
 
-func (t *TrackerParameters) InfoHash(hash []byte) {
-	t.Params["info_hash"] = string(hash)
-}
-
-func (t *TrackerParameters) PeerId(id string) {
-	t.Params["peerid"] = id
-}
-func (t *TrackerParameters) NumWanted(num int) {
-	t.Params["numwanted"] = string(num)
-}
-
-type Response struct {
-	Interval int64
+type TrackerResponse struct {
+	Interval    int64
 	MinInterval int64
 }
 
-func Tracker() {
+func QueryTracker(req *TrackerRequest, timeout time.Duration) (*TrackerResponse, error) {
 
-	go run()
-}
-
-func run() {
-
-}
-
-func Request(requestUrl string) (*Response, error) {
-
-	// Connect
-	conn, err := net.Dial("tcp", requestUrl)
+	// Build url & GET
+	resp, err := http.Get(buildUrl(req))
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer resp.Body.Close()
 
-	// Read response & parse contents
-	conn.SetReadDeadline(time.Now().Add(time.Second * 10)) // timeout
-	data, err := bencode.Decode(conn)
+	// Parse response
+	data, err := bencode.DecodeAsDict(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
 	// Check for failure
-	failure := optBs(data.(map[string] interface {}), "failure")
+	failure := optBs(data, failure)
 	if len(failure) > 0 {
-		return nil, err
+		return nil, errors.New(failure)
 	}
 
-	return &Response{
-		Interval : i(data.(map[string] interface {}), "interval"),
-		MinInterval : optI(data.(map[string] interface {}), "min interval"),
+	// Parse response
+	return &TrackerResponse{
+		Interval : i(data, interval),
+		MinInterval : i(data, minInterval),
 	}, nil
+
 }
 
-func BuildRequestUrl(uri string, tp TrackerParameters) string {
+func buildUrl(req *TrackerRequest) string {
 
-	keysAndValues := make([]string, 0, len(tp.Params))
-	for k, v := range tp.Params {
-		keysAndValues = append(keysAndValues, k + "=" + url.QueryEscape(v))
+	// Collect params
+	params := make(map[string] string)
+	params[infoHash] = string(req.InfoHash)
+	params[numWanted] = strconv.FormatInt(req.NumWanted, 10)
+	params[peerId] = req.PeerId
+
+	// Join params
+	pairs := make([]string, 0, len(params))
+	for k, v := range params {
+		pairs = append(pairs, k + "=" + url.QueryEscape(v))
 	}
 
-	return uri + "?" + strings.Join(keysAndValues, "&")
+	return req.Url + "?" + strings.Join(pairs, "&")
 }
