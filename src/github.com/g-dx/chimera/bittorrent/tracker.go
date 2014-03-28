@@ -43,21 +43,21 @@ func QueryTracker(req *TrackerRequest, timeout time.Duration) (*TrackerResponse,
 	defer resp.Body.Close()
 
 	// Parse response
-	data, err := bencode.DecodeAsDict(resp.Body)
+	bdata, err := bencode.DecodeAsDict(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
 	// Check for failure
-	failure := optBs(data, failure)
+	failure := optBs(bdata, failure)
 	if len(failure) > 0 {
 		return nil, errors.New(failure)
 	}
 
 	// Parse response
 	return &TrackerResponse{
-		Interval : i(data, interval),
-		MinInterval : i(data, minInterval),
+		Interval : i(bdata, interval),
+		MinInterval : i(bdata, minInterval),
 	}, nil
 
 }

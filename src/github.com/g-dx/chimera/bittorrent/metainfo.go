@@ -3,6 +3,8 @@ package bittorrent
 import (
 	"runtime"
 	"errors"
+	"io"
+	"github.com/g-dx/chimera/bencode"
 )
 
 const (
@@ -53,9 +55,11 @@ type MetaInfoFile struct {
 	CheckSum []byte
 }
 
-func NewMetaInfo(entries map[string] interface{}) (mi *MetaInfo, err error) {
+func NewMetaInfo(r io.Reader) (mi *MetaInfo, err error) {
 
 	// Recover from any decoding panics & return error
+	// TODO: Check if there is way push this into the bencode.go so it
+	//       can be usesd by anyone who is doing bencoding
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(runtime.Error); ok {
@@ -65,18 +69,24 @@ func NewMetaInfo(entries map[string] interface{}) (mi *MetaInfo, err error) {
 		}
 	}()
 
+	// Decode
+	bdata, err := bencode.DecodeAsDict(r)
+	if err != nil {
+		return nil, err
+	}
+	
 	// Build meta info
 	mi = &MetaInfo {
-		Announce:      bs(entries, announce),
-		CreationDate: optI(entries, creationDate),
-		Comment:      optBs(entries, comment),
-		CreatedBy:      optBs(entries, createdBy),
-		Encoding:      optBs(entries, encoding),
-		PieceLength:  i(d(entries, info), pieceLength),
-		Hashes:       toSha1Hashes(bs(d(entries, info), pieces)),
-		Private:      optI(d(entries, info), private) != 0,
-		Files:          toMetaInfoFiles(d(entries, info)),
-		InfoHash:      []byte(bs(entries, infoHash)),
+		Announce:      	bs(bdata, announce),
+		CreationDate:	optI(bdata, creationDate),
+		Comment:      	optBs(bdata, comment),
+		CreatedBy:      optBs(bdata, createdBy),
+		Encoding:		optBs(bdata, encoding),
+		PieceLength:	i(d(bdata, info), pieceLength),
+		Hashes:			toSha1Hashes(bs(d(bdata, info), pieces)),
+		Private:		optI(d(bdata, info), private) != 0,
+		Files:			toMetaInfoFiles(d(bdata, info)),
+		InfoHash:		[]byte(bs(bdata, infoHash)),
 	}
 
 	return mi, nil
@@ -102,7 +112,7 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 	miFiles := make([]MetaInfoFile, 0, len(files))
 	for _, entry := range files {
 
-		// All entries in files list are dictionarys which describe each file
+		// All bdata in files list are dictionarys which describe each file
 		miFile := entry.(map[string]interface{})
 		path := l(miFile, path)
 		miFiles = append(miFiles,
