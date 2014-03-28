@@ -1,7 +1,6 @@
 package bittorrent
 
 import (
-	"time"
 	"strings"
 	"net/url"
 	"github.com/g-dx/chimera/bencode"
@@ -40,7 +39,7 @@ type PeerAddress struct {
 	Port uint
 }
 
-func QueryTracker(req *TrackerRequest, timeout time.Duration) (*TrackerResponse, error) {
+func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
 
 	// Build url & GET
 	resp, err := http.Get(buildUrl(req))
