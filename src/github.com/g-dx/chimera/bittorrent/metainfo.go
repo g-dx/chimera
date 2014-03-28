@@ -103,7 +103,7 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 			MetaInfoFile {
 				Path:      "/",
 				Name:      name,
-				Length:      i(info, length),
+				Length:    i(info, length),
 				CheckSum: []byte(optBs(info, md5sum)),
 			}}
 	}
@@ -119,7 +119,7 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 			MetaInfoFile {
 				Path:      name+"/"+joinStrings(path[:len(path)-1], "/"),
 				Name:      path[len(path)-1].(string),
-				Length:      i(miFile, length),
+				Length:    i(miFile, length),
 				CheckSum: []byte(optBs(miFile, md5sum)),
 			})
 	}
