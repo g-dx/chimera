@@ -68,6 +68,9 @@ func main() {
 	}
 	fmt.Println("Url: ", resp)
 
+	// Connect to peers
+
+
 //	_, err = bittorrent.Request(url)
 //	if err != nil {
 //		fmt.Println("Error: ", err)
