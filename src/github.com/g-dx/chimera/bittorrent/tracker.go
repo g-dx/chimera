@@ -19,7 +19,7 @@ const (
 	minInterval = "min interval"
 	interval    = "interval"
 	failure     = "failure"
-	left      = "left"
+	left		= "left"
 )
 
 type TrackerRequest struct {
