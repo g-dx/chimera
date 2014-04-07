@@ -55,6 +55,14 @@ type MetaInfoFile struct {
 	CheckSum []byte
 }
 
+func (mi *MetaInfo) TotalLength() int64 {
+	var totalLength int64
+	for i := range mi.Files {
+		totalLength += mi.Files[i].Length
+	}
+	return totalLength
+}
+
 func NewMetaInfo(r io.Reader) (mi *MetaInfo, err error) {
 
 	// Recover from any decoding panics & return error
