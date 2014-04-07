@@ -19,13 +19,14 @@ const (
 	minInterval = "min interval"
 	interval    = "interval"
 	failure     = "failure"
+	left      = "left"
 )
 
 type TrackerRequest struct {
 	Url       string
 	InfoHash  []byte
-	PeerId    string
 	NumWanted int64
+	Left int64
 }
 
 type TrackerResponse struct {
@@ -55,8 +56,6 @@ func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
 		return nil, err
 	}
 
-	fmt.Println("", bdata)
-
 	// Check for failure
 	failure := optBs(bdata, failure)
 	if len(failure) > 0 {
@@ -75,10 +74,12 @@ func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
 func buildUrl(req *TrackerRequest) string {
 
 	// Collect params
+	// TODO: Add methods to allow adding key+value to dictionary
 	params := make(map[string] string)
 	params[infoHash] = string(req.InfoHash)
 	params[numWanted] = strconv.FormatInt(req.NumWanted, 10)
-	params[peerId] = req.PeerId
+	params[peerId] = string(PeerId)
+	params[left] = strconv.FormatInt(req.Left, 10)
 
 	// Join params
 	pairs := make([]string, 0, len(params))
@@ -127,4 +128,8 @@ func toPeerAddresses(v interface {}) []PeerAddress {
 	}
 
 	return peers
+}
+
+func (pa PeerAddress) GetIpAndPort() string {
+	return fmt.Sprintf("%v:%d", pa.Ip, pa.Port)
 }
