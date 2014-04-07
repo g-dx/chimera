@@ -151,7 +151,7 @@ func (ic * IncomingPeerConnection) loop(c chan<- error) {
 	for {
 		c, next := ic.maybeEnableSend()
 		select {
-		case <-ic.close: break
+		case <- ic.close: break
 		case <- keepAlive: // TODO: Close the connection!
 		case c <- next: ic.pending = ic.pending[1:]
 		default:
