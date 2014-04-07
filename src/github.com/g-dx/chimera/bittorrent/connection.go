@@ -14,6 +14,7 @@ import (
 var (
 	MAX_OUTGOING_BUFFER = 25 // max pending messages to write out on connection
 	MAX_INCOMING_BUFFER = 25 // max pending messages to send upstream
+	READ_BUFFER_SIZE = 4096
 
 	ONE_SECOND = 1 * time.Second
 	KEEP_ALIVE_PERIOD = 1 * time.Minute
@@ -281,7 +282,7 @@ func write(w io.Writer, buf []byte) ([]byte, int) {
 
 // Actually does the write & checks for timeout
 func read(r io.Reader) ([]byte, int) {
-	buf := make([]byte, 4096)
+	buf := make([]byte, READ_BUFFER_SIZE)
 	n, err := r.Read(buf)
 	if nil != err {
 		if opErr, ok := err.(*net.OpError); (ok && !opErr.Timeout() || !ok) {
