@@ -32,7 +32,7 @@ const (
 
 // Errors
 var (
-	errPiecesValueMalformed = errors.New("pieces value is malformed.")
+	errPiecesValueMalformed = errors.New("Pieces value is not a multiple of SHA-1 length.")
 )
 
 type MetaInfo struct {
