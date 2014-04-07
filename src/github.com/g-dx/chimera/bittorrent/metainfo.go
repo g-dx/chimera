@@ -55,6 +55,8 @@ type MetaInfoFile struct {
 	CheckSum []byte
 }
 
+// Returns the total length of file data. In multi-file mode this is the
+// length of all files added together
 func (mi *MetaInfo) TotalLength() int64 {
 	var totalLength int64
 	for i := range mi.Files {
@@ -85,8 +87,8 @@ func NewMetaInfo(r io.Reader) (mi *MetaInfo, err error) {
 	
 	// Build meta info
 	mi = &MetaInfo {
-		Announce:      	bs(bdata, announce),
-		CreationDate:	optI(bdata, creationDate),
+		Announce		: bs(bdata, announce),
+		CreationDate	: optI(bdata, creationDate),
 		Comment:      	optBs(bdata, comment),
 		CreatedBy:      optBs(bdata, createdBy),
 		Encoding:		optBs(bdata, encoding),
