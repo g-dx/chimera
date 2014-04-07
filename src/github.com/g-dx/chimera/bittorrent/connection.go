@@ -12,7 +12,8 @@ import (
 )
 
 var (
-	MAX_OUTGOING_BUFFER = 10 // max pending writes
+	MAX_OUTGOING_BUFFER = 25 // max pending messages to write out on connection
+	MAX_INCOMING_BUFFER = 25 // max pending messages to send upstream
 
 	ONE_SECOND = 1 * time.Second
 	KEEP_ALIVE_PERIOD = 1 * time.Minute
@@ -48,15 +49,15 @@ func NewConnection(addr string) (*PeerConnection, error) {
 			c : nil,
 			conn : conn,
 			buffer : make([]byte, 0),
-			pending : make([]ProtocolMessage, 0, 25),
+			pending : make([]ProtocolMessage, 0, MAX_INCOMING_BUFFER),
 			readHandshake : false,
 		},
 		out : OutgoingPeerConnection {
 			close : c,
 			c : nil,
 			conn : conn,
-			buffer : make([]ProtocolMessage, 0, MAX_OUTGOING_BUFFER),
-			next : make([]byte, 0),
+			pending : make([]ProtocolMessage, 0, MAX_OUTGOING_BUFFER),
+			curr : make([]byte, 0),
 		},
 	}
 	return pc, nil
@@ -90,7 +91,7 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) erro
 	// Write handshake
 	pc.out.add(outHandshake)
 	pc.out.writeOrSleepFor(HANDSHAKE_TIMEOUT)
-	if len(pc.out.next) != 0 {
+	if len(pc.out.curr) != 0 {
 		// Failed to write handshake in 5 seconds - close connection
 		return nil
 	}
@@ -146,22 +147,45 @@ type IncomingPeerConnection struct {
 
 func (ic * IncomingPeerConnection) loop(c chan<- error) {
 	defer onExit(c)
+	var keepAlive = time.After(KEEP_ALIVE_PERIOD)
 	for {
-		// Enable sending if we have messages to send
 		c, next := ic.maybeEnableSend()
-
 		select {
 		case <-ic.close: break
+		case <- keepAlive: // TODO: Close the connection!
 		case c <- next: ic.pending = ic.pending[1:]
-		default: ic.readForMaximumOf(ONE_SECOND)
+		default:
+			if n := ic.readOrSleepFor(ONE_SECOND); n > 0 {
+				keepAlive = time.After(KEEP_ALIVE_PERIOD)
+			}
 		}
 	}
 }
 
-func (ic * IncomingPeerConnection) readForMaximumOf(d time.Duration) {
-	ic.conn.SetReadDeadline(time.Now().Add(d))
-	ic.buffer = append(ic.buffer, read(ic.conn)...)
+func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (n int) {
+	if len(ic.pending) >= MAX_INCOMING_BUFFER {
+		time.Sleep(d)	// too many outstanding messages
+	} else {
+		// Set deadline, read as much as possible & attempt to unmarshal message
+		ic.conn.SetReadDeadline(time.Now().Add(d))
+		n, buf := read(ic.conn)
+		ic.buffer = append(ic.buffer, buf...)
+		ic.maybeReadMessage()
+	}
+	return n
+}
 
+func (ic * IncomingPeerConnection) maybeEnableSend() (chan<- ProtocolMessage, ProtocolMessage) {
+	var c chan<- ProtocolMessage
+	var next ProtocolMessage
+	if len(ic.pending) > 0 {
+		next = ic.pending[0]
+		c = ic.c
+	}
+	return c, next
+}
+
+func (ic * IncomingPeerConnection) maybeReadMessage() {
 	var msg ProtocolMessage
 	if !ic.readHandshake {
 		ic.buffer, msg = ReadHandshake(ic.buffer)
@@ -177,16 +201,6 @@ func (ic * IncomingPeerConnection) readForMaximumOf(d time.Duration) {
 	}
 }
 
-func (ic * IncomingPeerConnection) maybeEnableSend() (chan<- ProtocolMessage, ProtocolMessage) {
-	var c chan<- ProtocolMessage
-	var next ProtocolMessage
-	if len(ic.pending) > 0 {
-		next = ic.pending[0]
-		c = ic.c
-	}
-	return c, next
-}
-
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Outgoing Connection
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -195,50 +209,54 @@ type OutgoingPeerConnection struct {
 	close <-chan struct{}
 	c <-chan ProtocolMessage
 	conn net.Conn
-	buffer []ProtocolMessage
-	next []byte
+	pending []ProtocolMessage
+	curr []byte
 }
 
 func (oc * OutgoingPeerConnection) loop(c chan<- error) {
 	defer onExit(c)
+	var keepAlive = time.After(KEEP_ALIVE_PERIOD)
 	for {
-		// Reset keepalive and enable receive if buffer isn't full
-		keepAlive := time.After(KEEP_ALIVE_PERIOD)
 		c := oc.maybeEnableReceive()
-
 		select {
 		case <- oc.close: break
 		case <- keepAlive: oc.add(KeepAliveMessage)
 		case msg := <- c: oc.add(msg)
-		default: oc.writeOrSleepFor(ONE_SECOND)
+		default:
+			if n := oc.writeOrSleepFor(ONE_SECOND); n > 0 {
+				keepAlive = time.After(KEEP_ALIVE_PERIOD)
+			}
 		}
 	}
 }
 
 func (oc * OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
 	var c <-chan ProtocolMessage
-	if len(oc.buffer) < MAX_OUTGOING_BUFFER {
+	if len(oc.pending) < MAX_OUTGOING_BUFFER {
 		c = oc.c
 	}
 	return c
 }
 
 func (oc * OutgoingPeerConnection) add(msg ProtocolMessage) {
-	oc.buffer = append(oc.buffer, msg)
+	oc.pending = append(oc.pending, msg)
 }
 
-func (oc * OutgoingPeerConnection) writeOrSleepFor(d time.Duration) {
+func (oc * OutgoingPeerConnection) writeOrSleepFor(d time.Duration) (n int) {
+
+	// Set deadline, finish current message or start new one. If nothing to write - sleep
 	oc.conn.SetWriteDeadline(time.Now().Add(d))
-	if len(oc.next) > 0 {
-		oc.next = write(oc.conn, oc.next)
-	} else if len(oc.buffer) > 0 {
+	if len(oc.curr) > 0 {
+		oc.curr, n = write(oc.conn, oc.curr)
+	} else if len(oc.pending) > 0 {
 //		oc.log("->", oc.buffer[0].String())
-		oc.next = Marshal(oc.buffer[0])
-		oc.buffer = oc.buffer[1:]
-		oc.next = write(oc.conn, oc.next)
+		oc.curr = Marshal(oc.pending[0])
+		oc.pending = oc.pending[1:]
+		oc.curr, n = write(oc.conn, oc.curr)
 	} else {
 		time.Sleep(d)
 	}
+	return n
 }
 
 func onExit(c chan<- error) {
@@ -251,18 +269,18 @@ func onExit(c chan<- error) {
 }
 
 // Actually does the write & checks for timeout
-func write(w io.Writer, buf []byte) []byte {
+func write(w io.Writer, buf []byte) ([]byte, int) {
 	n, err := w.Write(buf)
 	if nil != err {
 		if opErr, ok := err.(*net.OpError); (ok && !opErr.Timeout() || !ok) {
 			panic(err)
 		}
 	}
-	return buf[n:]
+	return buf[n:], n
 }
 
 // Actually does the write & checks for timeout
-func read(r io.Reader) []byte {
+func read(r io.Reader) ([]byte, int) {
 	buf := make([]byte, 4096)
 	n, err := r.Read(buf)
 	if nil != err {
@@ -270,7 +288,7 @@ func read(r io.Reader) []byte {
 			panic(err)
 		}
 	}
-	return buf[:n]
+	return buf[:n], n
 }
 
 func (pc * PeerConnection) logRead(msg ProtocolMessage) {
