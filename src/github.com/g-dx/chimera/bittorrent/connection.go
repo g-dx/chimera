@@ -28,6 +28,11 @@ var (
 		errors.New("First message is not handshake")
 )
 
+type PeerIdentity struct {
+	id []byte      // from handshake
+	address string // ip:port
+}
+
 type PeerConnection struct {
 	close chan<- struct{}
 	in IncomingPeerConnection
@@ -67,12 +72,12 @@ func NewConnection(addr string) (*PeerConnection, error) {
 func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
 									 out chan<- ProtocolMessage,
 									 e chan<- error,
-                                     outHandshake *HandshakeMessage) (err error) {
+                                     handshake *HandshakeMessage) (*PeerIdentity, error) {
 
 	// Ensure we handshake properly
-	err = pc.completeHandshake(outHandshake)
+	id, err := pc.completeHandshake(handshake)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Connect up channels and start go routines
@@ -82,10 +87,10 @@ func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
 	go pc.out.loop(e)
 
 	fmt.Printf("Started connection\n")
-	return nil
+	return id, nil
 }
 
-func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) error {
+func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (*PeerIdentity, error) {
 
 	// TODO: we should possibly be first reading if this is an incoming connection
 
@@ -94,13 +99,13 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) erro
 	pc.out.writeOrSleepFor(HANDSHAKE_TIMEOUT)
 	if len(pc.out.curr) != 0 {
 		// Failed to write handshake in 5 seconds - close connection
-		return nil
+		return nil, errHandshakeNotReceived
 	}
 
 	// Read handshake
-	pc.in.readForMaximumOf(HANDSHAKE_TIMEOUT)
+	pc.in.readOrSleepFor(HANDSHAKE_TIMEOUT)
 	if len(pc.in.pending) == 0 {
-		return errHandshakeNotReceived
+		return nil, errHandshakeNotReceived
 	}
 	msg := pc.in.pending[0]
 	pc.in.pending = pc.in.pending[1:]
@@ -108,14 +113,14 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) erro
 	// Assert handshake
 	inHandshake, ok := msg.(HandshakeMessage)
 	if !ok {
-		return errFirstMessageNotHandshake
+		return nil, errFirstMessageNotHandshake
 	}
 
 	// Assert hashes
 	if !bytes.Equal(outHandshake.infoHash, inHandshake.infoHash) {
-		return errHashesNotEquals
+		return nil, errHashesNotEquals
 	}
-	return nil
+	return &PeerIdentity { inHandshake.infoHash, pc.in.conn.RemoteAddr().String() }, nil
 }
 
 func (pc *PeerConnection) Close() error {
@@ -163,16 +168,17 @@ func (ic * IncomingPeerConnection) loop(c chan<- error) {
 	}
 }
 
-func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (n int) {
+func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (int) {
 	if len(ic.pending) >= MAX_INCOMING_BUFFER {
 		time.Sleep(d)	// too many outstanding messages
-	} else {
-		// Set deadline, read as much as possible & attempt to unmarshal message
-		ic.conn.SetReadDeadline(time.Now().Add(d))
-		n, buf := read(ic.conn)
-		ic.buffer = append(ic.buffer, buf...)
-		ic.maybeReadMessage()
+		return 0
 	}
+
+	// Set deadline, read as much as possible & attempt to unmarshal message
+	ic.conn.SetReadDeadline(time.Now().Add(d))
+	buf, n := read(ic.conn)
+	ic.buffer = append(ic.buffer, buf...)
+	ic.maybeReadMessage()
 	return n
 }
 
@@ -197,6 +203,7 @@ func (ic * IncomingPeerConnection) maybeReadMessage() {
 		ic.buffer, msg = Unmarshal(ic.buffer)
 	}
 
+	// TODO: Filter out KeepAlive
 	if msg != nil {
 		ic.pending = append(ic.pending, msg)
 	}
