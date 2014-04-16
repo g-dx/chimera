@@ -92,7 +92,7 @@ func (m HandshakeMessage) String() string {
 // Incoming handshake
 func handshake(infoHash []byte, peerId []byte) *HandshakeMessage {
 	return &HandshakeMessage{
-		msg { uint32(len(protocolName)), 0},
+		msg { uint32(handshakeLength-4), 0}, // What a hack!...(sigh)
 		protocolName,
 		[8]byte {},
 		infoHash,
@@ -336,7 +336,7 @@ func Marshal(pm ProtocolMessage) []byte {
 	}
 
 	// Encode struct
-	w := bytes.NewBuffer(make([]byte, pm.Len()+4))
+	w := bytes.NewBuffer(make([]byte, 0, pm.Len()+4))
 	switch msg := pm.(type) {
 	case *PieceMessage:
 		marshal(w, binary.BigEndian, msg.len)

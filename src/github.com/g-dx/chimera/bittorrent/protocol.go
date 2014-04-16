@@ -1,134 +1,147 @@
 package bittorrent
 
-import "time"
+import (
+	"time"
+	"fmt"
+	"log"
+	"os"
+)
 
-type ProtocolHandler interface {
-	Choke()
-	Unchoke()
-	Interested()
-	Uninterested()
-	Have(index uint32)
-	Bitfield(b []byte)
-	Cancel(index, begin, length uint32)
-	Request(index, begin, length uint32)
-	Piece(index, begin uint32, block []byte)
+var (
+	QUARTER_OF_A_SECOND = 250 * time.Millisecond
+	FIFTY_MILLISECONDS = 50 * time.Millisecond
+	idealPeers = 5
+)
+
+type PeerCoordinator struct {
+	metaInfo *MetaInfo
+	peers []Peer
+	trackerResponses <-chan *TrackerResponse
+	addPeer chan Peer
+	pieceMap *PieceMap
+	done chan struct{}
+	dir string
+	logger *log.Logger
 }
 
+func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*PeerCoordinator, error) {
 
-type Peer struct {
-	pc PeerConnection
-	c chan<- ProtocolMessage
-	s PeerState
-}
-
-type PeerState struct {
-	remoteChoke, localChoke, remoteInterest, localInterest bool
-}
-
-func NewPeerState() PeerState {
-	return PeerState {
-		remoteChoke : true,
-		localChoke : true,
-		remoteInterest : false,
-		localInterest : false,
-	}
-}
-
-func (p * Peer) loop() {
-
-	for {
-		select {
-			case msg := <- p.c: p.handleMessage(msg)
-		}
-	}
-}
-
-func (p * Peer) handleMessage(pm ProtocolMessage) {
-	switch msg := pm.(type) {
-	case ChokeMessage: p.Choke()
-	case UnchokeMessage: p.Unchoke()
-	case InterestedMessage: p.Interested()
-	case UninterestedMessage:
-
-	}
-}
-
-func (p * Peer) Choke() {
-	// Cancel all pending "request" messages on connection
-	p.s.localChoke = true
-}
-
-func (p * Peer) Unchoke() {
-	p.s.localChoke = false
-}
-
-func (p * Peer) Interested() {
-	p.s.remoteInterest = true // TODO: This should be => !p.bitfield.IsComplete()
-}
-
-func (p * Peer) Uninterested() {
-	p.s.remoteInterest = false
-}
-
-func (p * Peer) Have(index uint32) {
-
-	// Check index is valid - if not close connection
-
-	// if !p.bitfield.Has(index) { ...
-
-	// Check if we are now interested
-	if !p.s.localInterest {
-		// TODO: Ask someone if we have this piece - if so, send "interested"
+	// Create log file
+	// Create log file & create loggers
+	f, err := os.Create(fmt.Sprintf("%v/coordinator.log", dir))
+	if err != nil {
+		return nil, err
 	}
 
-	// Set bit & check for peer becoming a seed
-	// p.bitfield.Set(index)
-	// p.s.remoteInterest = !p.bitfield.IsComplete()
-}
+	// Create piece map
+	pieceMap := NewPieceMap(len(mi.Hashes))
 
-func (p * Peer) Cancel(index, begin, length uint32) {
-	// Remove from pending reads queue?
-}
-
-func (p * Peer) Request(index, begin, length uint32) {
-	// Check index, begin & length is valid - if not close connection
-
-	if !p.s.remoteChoke {
-		// Add request to pending reads queue
+	// Create coordinator
+	pc := &PeerCoordinator{
+		metaInfo : mi,
+		peers : make([]Peer, 0, idealPeers),
+		trackerResponses : tr,
+		addPeer : make(chan Peer),
+		pieceMap : pieceMap,
+		done : make(chan struct{}),
+		dir : dir,
+		logger : log.New(f, "", log.Ldate | log.Ltime),
 	}
+
+	// Start loop & return
+	go pc.loop()
+	return pc, nil
 }
 
-func (p * Peer) Piece(index, begin uint32, block []byte) {
-	// Check index, begin & length is valid and we requested this piece
-
-	// Remove from pending write queue & ask someone to write it
+func (pc * PeerCoordinator) AwaitDone() {
+	// Await a receive to say we are finished...
+	<- pc.done
 }
 
-func (p * Peer) Bitfield(b []byte) {
-	// Check required high bits are set to zero
-
-	// Add to global piece map
-
-	// p.bitfield = b
-}
-
-func loop(c chan<- bool) {
-
+func (pc * PeerCoordinator) loop() {
 
 	for {
 
 		select {
+
 		case <- time.After(1 * time.Second):
 			// Run downloader...
+
 		case <- time.After(10 * time.Second):
 			// Run choking algorithm
-		case <- rmPeer:
-		case <- addPeer:
-		case <- newPeer:
-		case <- outgoingMessage:
+
+		case r := <- pc.trackerResponses:
+			pc.onTrackerResponse(r)
+
+		case p := <- pc.addPeer:
+			pc.peers = append(pc.peers, p)
+
 		default:
-			// Route message to peer
+			pc.processMessagesFor(QUARTER_OF_A_SECOND)
 		}
 	}
+}
 
+func (pc * PeerCoordinator) processMessagesFor(d time.Duration) {
+
+	pc.logger.Println("[Coordinator] - processing messages")
+
+	// Set a maximum amount of
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+
+		msgs := 0
+		for _, p := range pc.peers {
+			msgs += p.ProcessMessages(nil, nil)
+		}
+
+		// If we did nothing this loop - wait for more data to arrive
+		if msgs == 0 {
+			time.Sleep(FIFTY_MILLISECONDS)
+		}
+	}
+}
+
+func (pc * PeerCoordinator) onTrackerResponse(r *TrackerResponse) {
+
+	peerCount := len(pc.peers)
+	if peerCount < idealPeers {
+
+		// Add some
+		for _, pa := range r.PeerAddresses[25:] {
+			go pc.handlePeerConnect(pa)
+			peerCount++
+			if peerCount == idealPeers {
+				break
+			}
+		}
+	}
+}
+
+func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress) {
+
+	c, err := NewConnection(addr.GetIpAndPort())
+	if err != nil {
+		fmt.Println("Error: ", err)
+		// TODO: Should log this as can't connect or something...
+		return
+	}
+
+	in := make(chan ProtocolMessage)
+	out := make(chan ProtocolMessage)
+	e := make(chan error)
+	outHandshake := Handshake(pc.metaInfo.InfoHash)
+
+	// Attempt to establish connection
+	id, err := c.Establish(in, out, e, outHandshake, pc.dir)
+	if err != nil {
+		fmt.Println("Error: ", err)
+		c.Close()
+		return;
+	}
+
+	// Connected
+	p := NewPeer(*id, in, out, pc.logger)
+	fmt.Printf("New Peer: %v\n", p)
+	pc.addPeer <- p
 }
