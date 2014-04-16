@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"bytes"
 	"github.com/g-dx/chimera/bittorrent"
+	"time"
 )
 
 func main() {
@@ -99,35 +100,23 @@ func main() {
 //	fmt.Printf("Cancel:%v\n", buffer.Bytes())
 //	buffer.Reset()
 
-	in := make(chan bittorrent.ProtocolMessage)
-	out := make(chan bittorrent.ProtocolMessage)
-	e := make(chan error)
-	outHandshake := bittorrent.Handshake(metaInfo.InfoHash)
-
-	// Connect
-	var c *bittorrent.PeerConnection = nil
-	for _, pa := range resp.PeerAddresses[4:] {
-
-		c, err = bittorrent.NewConnection(pa.GetIpAndPort())
-		if err != nil {
-			fmt.Println("Error: ", err)
-			continue
-		}
-		c.Establish(in, out, e, outHandshake)
-		break;
+	// Create log directory
+	dir := fmt.Sprintf("/Users/Dakeyras/.chimera/%v [...%x]", time.Now().Format("2006-01-02 15.04.05"), mi.InfoHash[15:])
+	err := os.Mkdir(dir, os.ModeDir | os.ModePerm)
+	if err != nil {
+		fmt.Printf("Failed to create torrent dir: %v\n", err)
 	}
 
-	// Create empty bitfield message
-//	bits := len(metaInfo.Hashes)/8
-//	fmt.Printf("Bits: %v\n", bits)
-//	if len(metaInfo.Hashes) % 8 != 0 {
-//		bits++
-//	}
-//	in <-bittorrent.Bitfield(make([]byte, bits))
-	for _ = range out {
-		// Discard messages...for now!
-//		if msg == bittorrent.Unchoke {
-//			in <- bittorrent.Request(0, 0, )
-//		}
+	tr := make(chan *bittorrent.TrackerResponse)
+	pc, err := bittorrent.NewPeerCoordinator(metaInfo, dir, tr)
+	if err != nil {
+		fmt.Printf("Failed to create coordinator: %v\n", err)
+		return
 	}
+
+	// Send tracker response
+	tr <- resp
+
+	// Wait until everything is finished
+	pc.AwaitDone()
 }

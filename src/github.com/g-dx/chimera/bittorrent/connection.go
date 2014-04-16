@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"bytes"
 	"errors"
+	"log"
+	"os"
 )
 
 var (
@@ -37,6 +39,7 @@ type PeerConnection struct {
 	close chan<- struct{}
 	in IncomingPeerConnection
 	out OutgoingPeerConnection
+	logger *log.Logger
 }
 
 func NewConnection(addr string) (*PeerConnection, error) {
@@ -47,6 +50,7 @@ func NewConnection(addr string) (*PeerConnection, error) {
 		return nil, err
 	}
 
+	// TODO: Fix this close logic...
 	c := make(chan struct{}, 2) // 2 close messages - one for reader, other for writer
 	pc := &PeerConnection{
 		close : c,
@@ -72,37 +76,49 @@ func NewConnection(addr string) (*PeerConnection, error) {
 func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
 									 out chan<- ProtocolMessage,
 									 e chan<- error,
-                                     handshake *HandshakeMessage) (*PeerIdentity, error) {
+                                     handshake *HandshakeMessage,
+									 logDir string) (*PeerIdentity, error) {
+
+
+	// Create log file & create loggers
+	f, err := os.Create(fmt.Sprintf("%v/%v.log", logDir, pc.in.conn.RemoteAddr()))
+	if err != nil {
+		return nil, err
+	}
+	pc.in.logger  = log.New(f, " <- ", log.Ldate | log.Ltime)
+	pc.out.logger = log.New(f, " -> ", log.Ldate | log.Ltime)
+	pc.logger     = log.New(f, " -- ", log.Ldate | log.Ltime)
 
 	// Ensure we handshake properly
 	id, err := pc.completeHandshake(handshake)
 	if err != nil {
+		pc.logger.Println(err)
 		return nil, err
 	}
 
-	// Connect up channels and start go routines
+	// Connect up channels
 	pc.in.c = out
 	pc.out.c = in
+
+	// Start goroutines
 	go pc.in.loop(e)
 	go pc.out.loop(e)
 
-	fmt.Printf("Started connection\n")
+	pc.logger.Println("Established")
 	return id, nil
 }
 
 func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (*PeerIdentity, error) {
 
 	// TODO: we should possibly be first reading if this is an incoming connection
-
-	// Write handshake
+	// Attempt to write outgoing handshake
 	pc.out.add(outHandshake)
 	pc.out.writeOrSleepFor(HANDSHAKE_TIMEOUT)
 	if len(pc.out.curr) != 0 {
-		// Failed to write handshake in 5 seconds - close connection
 		return nil, errHandshakeNotReceived
 	}
 
-	// Read handshake
+	// Attempt to read incoming handshake
 	pc.in.readOrSleepFor(HANDSHAKE_TIMEOUT)
 	if len(pc.in.pending) == 0 {
 		return nil, errHandshakeNotReceived
@@ -111,7 +127,7 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (*Pe
 	pc.in.pending = pc.in.pending[1:]
 
 	// Assert handshake
-	inHandshake, ok := msg.(HandshakeMessage)
+	inHandshake, ok := msg.(*HandshakeMessage)
 	if !ok {
 		return nil, errFirstMessageNotHandshake
 	}
@@ -125,6 +141,8 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (*Pe
 
 func (pc *PeerConnection) Close() error {
 
+	pc.logger.Println("Closing connection")
+
 	// TODO: Should a channel be passed here to ensure a synchronous close?
 	// Shutdown reader & writer
 	pc.close <- struct{}{}
@@ -133,8 +151,10 @@ func (pc *PeerConnection) Close() error {
 	// Finally, shutdown connection
 	err := pc.in.conn.Close()
 	if err != nil {
-		// TODO: Log me
+		pc.logger.Println(err)
+		return err
 	}
+	pc.logger.Println("Connection closed")
 	return nil
 }
 
@@ -149,6 +169,7 @@ type IncomingPeerConnection struct {
 	buffer []byte
 	pending []ProtocolMessage
 	readHandshake bool
+	logger *log.Logger
 }
 
 func (ic * IncomingPeerConnection) loop(c chan<- error) {
@@ -166,10 +187,12 @@ func (ic * IncomingPeerConnection) loop(c chan<- error) {
 			}
 		}
 	}
+	ic.logger.Println("Loop exit")
 }
 
 func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (int) {
 	if len(ic.pending) >= MAX_INCOMING_BUFFER {
+		ic.logger.Println("Incoming buffer full - sleeping...")
 		time.Sleep(d)	// too many outstanding messages
 		return 0
 	}
@@ -177,6 +200,7 @@ func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (int) {
 	// Set deadline, read as much as possible & attempt to unmarshal message
 	ic.conn.SetReadDeadline(time.Now().Add(d))
 	buf, n := read(ic.conn)
+	ic.logger.Printf("Read (%v) bytes\n", n)
 	ic.buffer = append(ic.buffer, buf...)
 	ic.maybeReadMessage()
 	return n
@@ -203,8 +227,12 @@ func (ic * IncomingPeerConnection) maybeReadMessage() {
 		ic.buffer, msg = Unmarshal(ic.buffer)
 	}
 
-	// TODO: Filter out KeepAlive
 	if msg != nil {
+		ic.logger.Print(msg)
+	}
+
+	// Remove keepalive
+	if msg != nil && msg != KeepAliveMessage {
 		ic.pending = append(ic.pending, msg)
 	}
 }
@@ -219,6 +247,7 @@ type OutgoingPeerConnection struct {
 	conn net.Conn
 	pending []ProtocolMessage
 	curr []byte
+	logger *log.Logger
 }
 
 func (oc * OutgoingPeerConnection) loop(c chan<- error) {
@@ -236,6 +265,7 @@ func (oc * OutgoingPeerConnection) loop(c chan<- error) {
 			}
 		}
 	}
+	oc.logger.Println("Loop exit")
 }
 
 func (oc * OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
@@ -247,24 +277,38 @@ func (oc * OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
 }
 
 func (oc * OutgoingPeerConnection) add(msg ProtocolMessage) {
+	oc.logger.Print(msg)
 	oc.pending = append(oc.pending, msg)
 }
 
-func (oc * OutgoingPeerConnection) writeOrSleepFor(d time.Duration) (n int) {
+func (oc * OutgoingPeerConnection) 	writeOrSleepFor(d time.Duration) (bytes int) {
 
-	// Set deadline, finish current message or start new one. If nothing to write - sleep
-	oc.conn.SetWriteDeadline(time.Now().Add(d))
-	if len(oc.curr) > 0 {
-		oc.curr, n = write(oc.conn, oc.curr)
-	} else if len(oc.pending) > 0 {
-//		oc.log("->", oc.buffer[0].String())
-		oc.curr = Marshal(oc.pending[0])
-		oc.pending = oc.pending[1:]
-		oc.curr, n = write(oc.conn, oc.curr)
-	} else {
+	if !oc.hasDataToWrite() {
+		oc.logger.Println("No data to write - sleeping...")
 		time.Sleep(d)
+		return 0
 	}
-	return n
+
+	// Set deadline and write until we timeout or have nothing to write
+	oc.conn.SetWriteDeadline(time.Now().Add(d))
+	timeout := false
+	for !timeout && oc.hasDataToWrite() {
+		n := 0
+		if len(oc.curr) > 0 {
+			oc.curr, n, timeout = write(oc.conn, oc.curr)
+		} else if len(oc.pending) > 0 {
+			oc.curr = Marshal(oc.pending[0])
+			oc.pending = oc.pending[1:]
+			oc.curr, n, timeout = write(oc.conn, oc.curr)
+		}
+		bytes += n
+	}
+	oc.logger.Printf("Wrote (%v) bytes\n", bytes)
+	return bytes
+}
+
+func (oc * OutgoingPeerConnection) hasDataToWrite() bool {
+	return len(oc.curr) > 0 || len(oc.pending) > 0
 }
 
 func onExit(c chan<- error) {
@@ -277,14 +321,16 @@ func onExit(c chan<- error) {
 }
 
 // Actually does the write & checks for timeout
-func write(w io.Writer, buf []byte) ([]byte, int) {
+func write(w io.Writer, buf []byte) ([]byte, int, bool) {
+	timeout := false
 	n, err := w.Write(buf)
 	if nil != err {
 		if opErr, ok := err.(*net.OpError); (ok && !opErr.Timeout() || !ok) {
 			panic(err)
 		}
+		timeout = true
 	}
-	return buf[n:], n
+	return buf[n:], n, timeout
 }
 
 // Actually does the write & checks for timeout
@@ -297,16 +343,4 @@ func read(r io.Reader) ([]byte, int) {
 		}
 	}
 	return buf[:n], n
-}
-
-func (pc * PeerConnection) logRead(msg ProtocolMessage) {
-	pc.log("<-", msg.String())
-}
-
-func (pc * PeerConnection) logWrite(msg ProtocolMessage) {
-	pc.log("->", msg.String())
-}
-
-func (pc * PeerConnection) log(prefix string, msg string) {
-	fmt.Printf("%v [%v]%v %v\n", pc.in.conn.RemoteAddr(), time.Now(), prefix, msg)
 }
