@@ -36,11 +36,8 @@ var (
 )
 
 type MetaInfo struct {
-	Announce     string
+	Announce, Comment, CreatedBy, Encoding string
 	CreationDate uint64
-	Comment      string
-	CreatedBy    string
-	Encoding     string
 	PieceLength  uint32
 	Hashes       [][]byte
 	Private      bool
@@ -49,8 +46,7 @@ type MetaInfo struct {
 }
 
 type MetaInfoFile struct {
-	Path     string
-	Name     string
+	Path, Name string
 	Length   uint64
 	CheckSum []byte
 }
