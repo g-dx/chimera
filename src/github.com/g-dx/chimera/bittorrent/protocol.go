@@ -10,18 +10,20 @@ import (
 var (
 	QUARTER_OF_A_SECOND = 250 * time.Millisecond
 	FIFTY_MILLISECONDS = 50 * time.Millisecond
-	idealPeers = 5
+	idealPeers = 25
 )
 
 type PeerCoordinator struct {
 	metaInfo *MetaInfo
-	peers []Peer
+	peers []*Peer
 	trackerResponses <-chan *TrackerResponse
-	addPeer chan Peer
+	addPeer chan *Peer
 	pieceMap *PieceMap
 	done chan struct{}
 	dir string
 	logger *log.Logger
+	reader chan RequestMessage
+	writer chan BlockMessage
 }
 
 func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*PeerCoordinator, error) {
@@ -32,20 +34,29 @@ func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 	if err != nil {
 		return nil, err
 	}
+	logger := log.New(f, "", log.Ldate | log.Ltime)
+
+	// Start fake disk reader
+	diskWriter := make(chan BlockMessage)
+	diskReader := make(chan RequestMessage)
+	go mockDisk(diskReader, diskWriter, logger)
+
 
 	// Create piece map
-	pieceMap := NewPieceMap(len(mi.Hashes))
+	pieceMap := NewPieceMap(uint32(len(mi.Hashes)), mi.PieceLength, mi.TotalLength())
 
 	// Create coordinator
 	pc := &PeerCoordinator{
 		metaInfo : mi,
-		peers : make([]Peer, 0, idealPeers),
+		peers : make([]*Peer, 0, idealPeers),
 		trackerResponses : tr,
-		addPeer : make(chan Peer),
+		addPeer : make(chan *Peer),
 		pieceMap : pieceMap,
 		done : make(chan struct{}),
 		dir : dir,
-		logger : log.New(f, "", log.Ldate | log.Ltime),
+		logger : logger,
+		reader : diskReader,
+		writer : diskWriter,
 	}
 
 	// Start loop & return
@@ -60,12 +71,14 @@ func (pc * PeerCoordinator) AwaitDone() {
 
 func (pc * PeerCoordinator) loop() {
 
+	onPicker := time.After(1 * time.Second)
 	for {
 
 		select {
 
-		case <- time.After(1 * time.Second):
-			// Run downloader...
+		case <- onPicker:
+			PickPieces(pc.peers, pc.pieceMap)
+			onPicker = time.After(1 * time.Second)
 
 		case <- time.After(10 * time.Second):
 			// Run choking algorithm
@@ -84,15 +97,13 @@ func (pc * PeerCoordinator) loop() {
 
 func (pc * PeerCoordinator) processMessagesFor(d time.Duration) {
 
-	pc.logger.Println("[Coordinator] - processing messages")
-
 	// Set a maximum amount of
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
 
 		msgs := 0
 		for _, p := range pc.peers {
-			msgs += p.ProcessMessages(nil, nil)
+			msgs += p.ProcessMessages(pc.reader, pc.writer)
 		}
 
 		// If we did nothing this loop - wait for more data to arrive
@@ -109,7 +120,7 @@ func (pc * PeerCoordinator) onTrackerResponse(r *TrackerResponse) {
 
 		// Add some
 		for _, pa := range r.PeerAddresses[25:] {
-			go pc.handlePeerConnect(pa)
+			go pc.handlePeerConnect(pa, pc.pieceMap)
 			peerCount++
 			if peerCount == idealPeers {
 				break
@@ -118,30 +129,29 @@ func (pc * PeerCoordinator) onTrackerResponse(r *TrackerResponse) {
 	}
 }
 
-func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress) {
+func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceMap) {
 
 	c, err := NewConnection(addr.GetIpAndPort())
 	if err != nil {
-		fmt.Println("Error: ", err)
-		// TODO: Should log this as can't connect or something...
+		pc.logger.Printf("Can't connect to [%v]: %v\n", addr, err)
 		return
 	}
 
-	in := make(chan ProtocolMessage)
-	out := make(chan ProtocolMessage)
+	in := make(chan ProtocolMessage, 10)
+	out := make(chan ProtocolMessage, 10)
 	e := make(chan error)
 	outHandshake := Handshake(pc.metaInfo.InfoHash)
 
 	// Attempt to establish connection
 	id, err := c.Establish(in, out, e, outHandshake, pc.dir)
 	if err != nil {
-		fmt.Println("Error: ", err)
+		pc.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
 		c.Close()
 		return;
 	}
 
 	// Connected
-	p := NewPeer(*id, in, out, pc.logger)
-	fmt.Printf("New Peer: %v\n", p)
+	p := NewPeer(*id, in, out, pc.metaInfo, pieceMap, pc.logger)
+	pc.logger.Printf("New Peer: %v\n", p)
 	pc.addPeer <- p
 }

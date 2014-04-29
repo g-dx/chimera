@@ -2,7 +2,6 @@ package bittorrent
 
 import (
 	"net"
-//	"bufio"
 	"fmt"
 	"time"
 	"io"
@@ -33,6 +32,10 @@ var (
 type PeerIdentity struct {
 	id []byte      // from handshake
 	address string // ip:port
+}
+
+func (pi PeerIdentity) String() string {
+	return pi.address
 }
 
 type PeerConnection struct {
@@ -79,15 +82,14 @@ func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
                                      handshake *HandshakeMessage,
 									 logDir string) (*PeerIdentity, error) {
 
-
 	// Create log file & create loggers
 	f, err := os.Create(fmt.Sprintf("%v/%v.log", logDir, pc.in.conn.RemoteAddr()))
 	if err != nil {
 		return nil, err
 	}
-	pc.in.logger  = log.New(f, " <- ", log.Ldate | log.Ltime)
-	pc.out.logger = log.New(f, " -> ", log.Ldate | log.Ltime)
-	pc.logger     = log.New(f, " -- ", log.Ldate | log.Ltime)
+	pc.in.logger  = log.New(f, " -> [in]  ", log.Ldate | log.Ltime)
+	pc.out.logger = log.New(f, " <- [out] ", log.Ldate | log.Ltime)
+	pc.logger     = log.New(f, " -- [con]", log.Ldate | log.Ltime)
 
 	// Ensure we handshake properly
 	id, err := pc.completeHandshake(handshake)
@@ -108,7 +110,16 @@ func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
 	return id, nil
 }
 
-func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (*PeerIdentity, error) {
+func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (pi *PeerIdentity, err error) {
+	// TODO: Refactor this to common logic...
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(runtime.Error); ok {
+				panic(r)
+			}
+			err = r.(error)
+		}
+	}()
 
 	// TODO: we should possibly be first reading if this is an incoming connection
 	// Attempt to write outgoing handshake
@@ -200,7 +211,6 @@ func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (int) {
 	// Set deadline, read as much as possible & attempt to unmarshal message
 	ic.conn.SetReadDeadline(time.Now().Add(d))
 	buf, n := read(ic.conn)
-	ic.logger.Printf("Read (%v) bytes\n", n)
 	ic.buffer = append(ic.buffer, buf...)
 	ic.maybeReadMessage()
 	return n
@@ -284,7 +294,6 @@ func (oc * OutgoingPeerConnection) add(msg ProtocolMessage) {
 func (oc * OutgoingPeerConnection) 	writeOrSleepFor(d time.Duration) (bytes int) {
 
 	if !oc.hasDataToWrite() {
-		oc.logger.Println("No data to write - sleeping...")
 		time.Sleep(d)
 		return 0
 	}
@@ -303,7 +312,6 @@ func (oc * OutgoingPeerConnection) 	writeOrSleepFor(d time.Duration) (bytes int)
 		}
 		bytes += n
 	}
-	oc.logger.Printf("Wrote (%v) bytes\n", bytes)
 	return bytes
 }
 

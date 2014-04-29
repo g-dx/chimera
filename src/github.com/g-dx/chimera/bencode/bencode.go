@@ -17,6 +17,7 @@ var decodeFunctions map[rune]func([]byte) (interface{}, []byte)
 const (
 	typeTerminator      rune = 'e'
 	byteStringSeparator rune = ':'
+	intSize                  = 64
 )
 
 func DecodeAsDict(r io.Reader) (map[string]interface{}, error) {
@@ -28,7 +29,7 @@ func DecodeAsDict(r io.Reader) (map[string]interface{}, error) {
 	}
 
 	// Check type
-	m, ok := data.(map[string] interface {})
+	m, ok := data.(map[string] interface{})
 	if !ok {
 		return nil, errors.New("Supplied data is not a dictionary.")
 	}
@@ -54,7 +55,7 @@ func Decode(r io.Reader) (v interface{}, err error) {
 	}
 
 	// Decode & check all data processed
-	v, remainingBuf := decoderFn(nextRune(buf))(buf)
+	v, remainingBuf := decodeFnFor(nextRune(buf))(buf)
 	if len(remainingBuf) != 0 {
 		panic(errors.New("Trailing data detected: " + string(remainingBuf)))
 	}
@@ -70,7 +71,7 @@ func decodeInteger(buf []byte) (interface{}, []byte) {
 	}
 
 	// Convert to signed 64-bit int
-	v, _ := strconv.ParseInt(string(buf[1:i]), 10, 64)
+	v, _ := strconv.ParseInt(string(buf[1:i]), 10, intSize)
 	return v, buf[i+1:]
 }
 
@@ -83,7 +84,7 @@ func decodeByteString(buf []byte) (interface{}, []byte) {
 	}
 
 	// Calculate length of string & discard length bytes
-	strLen, _ := strconv.ParseUint(string(buf[:i]), 10, 64)
+	strLen, _ := strconv.ParseUint(string(buf[:i]), 10, intSize)
 	buf = buf[i+1:]
 	return string(buf[:strLen]), buf[strLen:]
 }
@@ -96,7 +97,7 @@ func decodeList(buf []byte) (interface{}, []byte) {
 	// Drop leading 'l' and consume until terminating character
 	buf = buf[1:]
 	for r := nextRune(buf); r != typeTerminator; r = nextRune(buf) {
-		v, buf = decoderFn(r)(buf)
+		v, buf = decodeFnFor(r)(buf)
 		list = append(list, v)
 	}
 
@@ -113,7 +114,7 @@ func decodeDictionary(buf []byte) (interface{}, []byte) {
 	buf = buf[1:]
 	for r := nextRune(buf); r != typeTerminator; r = nextRune(buf) {
 		k, preValueBuf = decodeByteString(buf)
-		v, buf = decoderFn(nextRune(preValueBuf))(preValueBuf)
+		v, buf = decodeFnFor(nextRune(preValueBuf))(preValueBuf)
 		dict[k.(string)] = v
 
 		// SPECIAL CASE:
@@ -136,7 +137,7 @@ func nextRune(buf []byte) rune {
 	return rune(buf[0])
 }
 
-func decoderFn(r rune) func([]byte) (interface{}, []byte) {
+func decodeFnFor(r rune) func([]byte) (interface{}, []byte) {
 	fn := decodeFunctions[r]
 	if fn == nil {
 		panic(errors.New(fmt.Sprint("No decoding function found for character: %s", r)))

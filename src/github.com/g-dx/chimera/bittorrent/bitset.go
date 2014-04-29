@@ -5,10 +5,10 @@ import (
 	"bytes"
 )
 
-var bitMasks = [8]uint8{ 1, 2, 4, 8, 16, 32, 64, 128 }
+var bitMasks = [8]byte{ 1, 2, 4, 8, 16, 32, 64, 128 }
 
 type BitSet struct {
-	bits []uint8
+	bits []byte
 	size uint32
 	complete bool
 }
@@ -24,12 +24,21 @@ func NewBitSet(size uint32) *BitSet {
 	return &BitSet { make([]uint8, len), size, false }
 }
 
+func NewFromBytes(bits []byte, size uint32) *BitSet {
+	// TODO: Ensure high bits are not set...
+	return &BitSet { bits, size, false }
+}
+
 func (bs BitSet) Have(i uint32) bool {
 	if !bs.IsValid(i) {
 		return false
 	}
 
 	return (bs.bits[i/8] & bitMasks[i%8]) == bitMasks[i%8]
+}
+
+func (bs BitSet) Size() uint32 {
+	return bs.size
 }
 
 func (bs *BitSet) Set(i uint32) {

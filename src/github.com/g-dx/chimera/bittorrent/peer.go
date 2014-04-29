@@ -20,25 +20,27 @@ type ProtocolHandler interface {
 	Bitfield(b []byte)
 	Cancel(index, begin, length uint32)
 	Request(index, begin, length uint32)
-	Piece(index, begin uint32, block []byte)
+	Block(index, begin uint32, block []byte)
 }
 
-type bitfield interface {
-	IsComplete() bool
-	IsValid(index uint32) bool
-	Has(index uint32) bool
-	Set(index uint32)
+type Statistics struct {
+	totalBytesDownloaded uint64
+	bytesDownloadedPerUpdate uint
+	bytesDownloaded uint
 }
 
-type Peer interface {
-	CanWrite() bool
-	ProcessMessages(diskReader chan<- RequestMessage, diskWriter chan<- PieceMessage) int
-	CanRead() bool
-	ReadNextMessage() bool
-	WriteNextMessage() bool
+func (s * Statistics) Update() {
+
+	// Update & reset
+	s.bytesDownloadedPerUpdate = s.bytesDownloaded
+	s.bytesDownloaded = 0
 }
 
-type peer struct {
+func (s * Statistics) Downloaded(n uint) {
+	s.bytesDownloaded += n
+}
+
+type Peer struct {
 
 	// General protocol traffic
 	outBuf	   []ProtocolMessage
@@ -49,45 +51,52 @@ type peer struct {
 
 	// Local reads sent & received pieces
 	localPendingReads []*RequestMessage
-	localPendingWrites []*PieceMessage
+	localPendingWrites []*BlockMessage
 
 	out 	    chan<- ProtocolMessage
 	in 			<-chan ProtocolMessage
 	pieceMap 	*PieceMap
-	bitfield 	bitfield
+	bitfield 	*BitSet
 	state PeerState
 	id PeerIdentity
 	logger * log.Logger
+	stats * Statistics
 }
 
-func NewPeer(id PeerIdentity, out chan<- ProtocolMessage, in <-chan ProtocolMessage, logger * log.Logger) Peer {
-	return &peer {
+func NewPeer(id PeerIdentity,
+		     out chan<- ProtocolMessage,
+			 in <-chan ProtocolMessage,
+			 mi * MetaInfo,
+	         pieceMap *PieceMap,
+			 logger * log.Logger) *Peer {
+	return &Peer {
 		outBuf : make([]ProtocolMessage, 0, 25),
 		remotePendingReads : make([]*RequestMessage, 0, maxRemoteRequestQueue),
 		remoteSubmittedReads : make([]*RequestMessage, 0, maxRemoteRequestQueue),
 		localPendingReads : make([]*RequestMessage, 0, maxRemoteRequestQueue),
-		localPendingWrites : make([]*PieceMessage, 0, maxRemoteRequestQueue),
+		localPendingWrites : make([]*BlockMessage, 0, maxRemoteRequestQueue),
 		out : out,
 		in : in,
-		pieceMap : nil,
-		bitfield : nil,
+		pieceMap : pieceMap,
+		bitfield : NewBitSet(uint32(len(mi.Hashes))),
 		state : NewPeerState(),
 		id : id,
 		logger : logger,
+		stats : new(Statistics),
 	}
 }
 
-func (p * peer) CanWrite() bool {
+func (p * Peer) CanWrite() bool {
 	return len(p.outBuf) > 0
 }
 
-func (p * peer) CanRead() bool {
+func (p * Peer) CanRead() bool {
 	// Can read if there is space in request queue
 	// TODO: should we consider the length of the protocol queue?
 	return len(p.remotePendingReads) < maxRemoteRequestQueue && len(p.outBuf) < maxOutgoingQueue
 }
 
-func (p * peer) ReadNextMessage() (readMessage bool) {
+func (p * Peer) ReadNextMessage() (readMessage bool) {
 
 	select {
 	case msg := <- p.in:
@@ -99,7 +108,7 @@ func (p * peer) ReadNextMessage() (readMessage bool) {
 	return readMessage
 }
 
-func (p * peer) WriteNextMessage() (wroteMessage bool) {
+func (p * Peer) WriteNextMessage() (wroteMessage bool) {
 
 	select {
 	case p.out <- p.outBuf[0]:
@@ -123,50 +132,53 @@ func NewPeerState() PeerState {
 	}
 }
 
-func (p * peer) handleMessage(pm ProtocolMessage) {
+func (p * Peer) handleMessage(pm ProtocolMessage) {
+	p.logger.Printf("%v, Handling Msg: %v\n", p.id, pm)
 	switch msg := pm.(type) {
-	case ChokeMessage: p.Choke()
-	case UnchokeMessage: p.Unchoke()
-	case InterestedMessage: p.Interested()
-	case UninterestedMessage: p.Uninterested()
-	case BitfieldMessage: p.Bitfield(msg.Bits())
-	case HaveMessage: p.Have(msg.Index())
-	case CancelMessage: p.Cancel(msg.Index(), msg.Begin(), msg.Length())
-	case RequestMessage: p.Request(msg.Index(), msg.Begin(), msg.Length())
-	case PieceMessage: p.Piece(msg.Index(), msg.Begin(), msg.Block())
+	case *ChokeMessage: p.Choke()
+	case *UnchokeMessage: p.Unchoke()
+	case *InterestedMessage: p.Interested()
+	case *UninterestedMessage: p.Uninterested()
+	case *BitfieldMessage: p.Bitfield(msg.Bits())
+	case *HaveMessage: p.Have(msg.Index())
+	case *CancelMessage: p.Cancel(msg.Index(), msg.Begin(), msg.Length())
+	case *RequestMessage: p.Request(msg.Index(), msg.Begin(), msg.Length())
+	case *BlockMessage: p.Block(msg.Index(), msg.Begin(), msg.Block())
 	default:
 		panic(fmt.Sprintf("Unknown protocol message: %v", pm))
 	}
 }
 
-func (p * peer) Choke() {
+func (p * Peer) Choke() {
 	// Choke:
-	// 1. clear local request queue
-	// 2. set state
+	// 1. Return blocks
+	// 2. Clear local request queue
+	// 3. Set state
+	p.pieceMap.ReturnBlocks(p.localPendingReads)
 	p.localPendingReads = make([]*RequestMessage, 0, maxOutstandingLocalRequests)
 	p.state.localChoke = true
 }
 
-func (p * peer) Unchoke() {
+func (p * Peer) Unchoke() {
 	// Unchoke:
 	// 1. set state
 	// 2. TODO: Should have requests ready to write
 	p.state.localChoke = false
 }
 
-func (p * peer) Interested() {
+func (p * Peer) Interested() {
 	// Interested
 	// 1. Set state, ensure they aren't a peer
 	p.state.remoteInterest = !p.bitfield.IsComplete()
 }
 
-func (p * peer) Uninterested() {
+func (p * Peer) Uninterested() {
 	// Uninterested
 	// 1. Set state, ensure they aren't a peer
 	p.state.remoteInterest = false
 }
 
-func (p * peer) Have(index uint32) {
+func (p * Peer) Have(index uint32) {
 	// Have
 	// 1. ensure valid index & not already in possession
 	// 2. check if we need piece - if so send interest
@@ -174,7 +186,7 @@ func (p * peer) Have(index uint32) {
 		die(fmt.Sprintf("Invalid index received: %v", index))
 	}
 
-	if !p.bitfield.Has(index) {
+	if !p.bitfield.Have(index) {
 		if p.isNowInteresting(index) {
 			p.send(Interested)
 		}
@@ -184,7 +196,7 @@ func (p * peer) Have(index uint32) {
 	}
 }
 
-func (p * peer) Cancel(index, begin, length uint32) {
+func (p * Peer) Cancel(index, begin, length uint32) {
 	// Cancel:
 	// 1. Remove all remote peer requests for this piece
 	for i, req := range p.remotePendingReads {
@@ -200,7 +212,7 @@ func (p * peer) Cancel(index, begin, length uint32) {
 	}
 }
 
-func (p * peer) Request(index, begin, length uint32) {
+func (p * Peer) Request(index, begin, length uint32) {
 	// Check index, begin & length is valid - if not close connection
 	if !p.pieceMap.IsValid(index, begin, length) {
 		die(fmt.Sprintf("Invalid request received: %v, %v, %v", index, begin, length))
@@ -208,11 +220,11 @@ func (p * peer) Request(index, begin, length uint32) {
 
 	if !p.state.remoteChoke {
 		// Add request to pending reads queue
-		p.remotePendingReads = append(p.remotePendingReads, Request(int(index), int(begin), int(length))) // TODO: We are we doing this? We should just pass the message in
+		p.remotePendingReads = append(p.remotePendingReads, Request(index, begin, length))
 	}
 }
 
-func (p * peer) Piece(index, begin uint32, block []byte) {
+func (p * Peer) Block(index, begin uint32, block []byte) {
 	// Check index, begin & length is valid and we requested this piece
 	if !p.pieceMap.IsValid(index, begin, uint32(len(block))) {
 		die(fmt.Sprintf("Invalid piece received: %v, %v, %v", index, begin, block))
@@ -228,22 +240,36 @@ func (p * peer) Piece(index, begin uint32, block []byte) {
 	}
 
 	// To pending queue
-	p.localPendingWrites = append(p.localPendingWrites, Piece(int(index), int(begin), block))
+	p.localPendingWrites = append(p.localPendingWrites, Block(index, begin, block))
+	p.Stats().Downloaded(uint(len(block)))
 }
 
-func (p * peer) Bitfield(b []byte) {
+func (p * Peer) Bitfield(b []byte) {
 	// Check required high bits are set to zero
 	// TODO: Validate bitfield
 
+	// Create new bitfield
+	p.bitfield = NewFromBytes(b, p.bitfield.Size())
+
 	// Add to global piece map
-	p.pieceMap.IncBitfield(b)
+	p.pieceMap.IncAll(p.bitfield)
+
+	// Check if we are interested
+	for i := uint32(0); i < p.bitfield.Size(); i++ {
+		if p.pieceMap.Piece(i).BlocksNeeded() {
+			p.state.localInterest = true
+			break
+		}
+	}
 }
 
-func (p * peer) ProcessMessages(diskReader chan<- RequestMessage, diskWriter chan<- PieceMessage) int {
+func (p * Peer) ProcessMessages(diskReader chan RequestMessage, diskWriter chan BlockMessage) int {
 
 	// Process reads
 	io := false
-	if p.CanRead() {
+	r := p.CanRead()
+//	p.logger.Printf("%v, Can Read: %v\n", p.id, r)
+	if r {
 		io = io || p.ReadNextMessage()
 	}
 
@@ -254,7 +280,9 @@ func (p * peer) ProcessMessages(diskReader chan<- RequestMessage, diskWriter cha
 	io = io || len(p.localPendingWrites) > 0
 
 	// Process writes
-	if p.CanWrite() {
+	w := p.CanWrite()
+//	p.logger.Printf("%v, Can Write: %v\n", p.id, w)
+	if w {
 		io = io || p.WriteNextMessage()
 	}
 
@@ -266,11 +294,16 @@ func (p * peer) ProcessMessages(diskReader chan<- RequestMessage, diskWriter cha
 	}
 }
 
-func (p * peer) isNowInteresting(index uint32) bool {
+func (p Peer) Stats() *Statistics {
+	return p.stats
+
+}
+
+func (p * Peer) isNowInteresting(index uint32) bool {
 	return !p.state.localInterest && p.pieceMap.Piece(index).BlocksNeeded()
 }
 
-func (p * peer) send(msg ProtocolMessage) {
+func (p * Peer) send(msg ProtocolMessage) {
 	p.outBuf = append(p.outBuf, msg)
 }
 
@@ -278,7 +311,7 @@ func die(msg string) {
 	fmt.Println(msg)
 }
 
-func (p * peer) readBlock(diskReader chan<- RequestMessage) {
+func (p * Peer) readBlock(diskReader chan RequestMessage) {
 	if len(p.remotePendingReads) > 0 {
 		select {
 		case diskReader <- *p.remotePendingReads[0]:
@@ -290,7 +323,7 @@ func (p * peer) readBlock(diskReader chan<- RequestMessage) {
 	}
 }
 
-func (p * peer) writeBlock(diskWriter chan<- PieceMessage) {
+func (p * Peer) writeBlock(diskWriter chan BlockMessage) {
 	if len(p.localPendingWrites) > 0 {
 		select {
 		case diskWriter <- *p.localPendingWrites[0]:
@@ -301,7 +334,7 @@ func (p * peer) writeBlock(diskWriter chan<- PieceMessage) {
 	}
 }
 
-func (p * peer) onBlockRead(index, begin uint32, block []byte) {
+func (p * Peer) onBlockRead(index, begin uint32, block []byte) {
 
 	// Attempt to remove from read requests
 	removed := false
@@ -314,11 +347,23 @@ func (p * peer) onBlockRead(index, begin uint32, block []byte) {
 
 	// if found add to outgoing queue
 	if removed {
-		p.send(Piece(int(index), int(begin), block))
+		p.send(Block(index, begin, block))
 	}
 }
 
-func (p * peer) addOutgoingRequest(req *RequestMessage) {
+func (p * Peer) AddOutgoingRequest(req *RequestMessage) {
 	p.localPendingReads = append(p.localPendingReads, req)
 	p.outBuf = append(p.outBuf, req)
+}
+
+func (p * Peer) BlocksRequired() uint {
+	return uint(maxRemoteRequestQueue - len(p.localPendingReads))
+}
+
+func (p * Peer) CanDownload() bool {
+	return !p.state.localChoke && p.state.localInterest && p.BlocksRequired() > 0
+}
+
+func (p * Peer) String() string {
+	return fmt.Sprintf("")
 }

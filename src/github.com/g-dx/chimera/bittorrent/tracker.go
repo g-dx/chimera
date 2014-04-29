@@ -19,25 +19,26 @@ const (
 	minInterval = "min interval"
 	interval    = "interval"
 	failure     = "failure"
-	left		= "left"
+	left        = "left"
+	peers       = "peers"
 )
 
 type TrackerRequest struct {
 	Url       string
 	InfoHash  []byte
-	NumWanted int64
-	Left int64
+	NumWanted uint
+	Left      uint64 // Must be 64-bit for large files
 }
 
 type TrackerResponse struct {
-	Interval    int64
-	MinInterval int64
+	Interval      uint
+	MinInterval   uint
 	PeerAddresses []PeerAddress
 }
 
 type PeerAddress struct {
-	Id string
-	Ip string
+	Id   string
+	Ip   string
 	Port uint
 }
 
@@ -64,9 +65,9 @@ func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
 
 	// Parse response
 	return &TrackerResponse{
-		Interval 		: i(bdata, interval),
-		MinInterval 	: i(bdata, minInterval),
-		PeerAddresses 	: toPeerAddresses(bdata["peers"]),
+		Interval       : uint(i(bdata, interval)),
+		MinInterval    : uint(i(bdata, minInterval)),
+		PeerAddresses  : toPeerAddresses(bdata[peers]),
 	}, nil
 
 }
@@ -77,9 +78,9 @@ func buildUrl(req *TrackerRequest) string {
 	// TODO: Add methods to allow adding key+value to dictionary
 	params := make(map[string] string)
 	params[infoHash] = string(req.InfoHash)
-	params[numWanted] = strconv.FormatInt(req.NumWanted, 10)
+	params[numWanted] = strconv.FormatUint(uint64(req.NumWanted), 10)
 	params[peerId] = string(PeerId)
-	params[left] = strconv.FormatInt(req.Left, 10)
+	params[left] = strconv.FormatUint(req.Left, 10)
 
 	// Join params
 	pairs := make([]string, 0, len(params))
