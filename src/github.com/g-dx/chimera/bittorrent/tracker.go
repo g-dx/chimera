@@ -31,14 +31,12 @@ type TrackerRequest struct {
 }
 
 type TrackerResponse struct {
-	Interval      uint
-	MinInterval   uint
+	Interval, MinInterval uint
 	PeerAddresses []PeerAddress
 }
 
 type PeerAddress struct {
-	Id   string
-	Ip   string
+	Id, Ip string
 	Port uint
 }
 
