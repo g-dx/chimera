@@ -18,7 +18,7 @@ const (
 	haveId
 	bitfieldId
 	requestId
-	pieceId
+	blockId
 	cancelId
 )
 
@@ -31,7 +31,7 @@ const (
 	haveLength uint32         = 5
 	cancelLength uint32       = 13
 	requestLength uint32      = 13
-	handshakeLength uint32	  = 68
+	handshakeLength uint32    = 68
 )
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -179,8 +179,8 @@ func (m HaveMessage) String() string {
 	return fmt.Sprintf("Have [%v]", m.index)
 }
 
-func Have(i int) *HaveMessage {
-	return &HaveMessage { msg { len : haveLength, id : haveId}, uint32(i) }
+func Have(i uint32) *HaveMessage {
+	return &HaveMessage { msg { len : haveLength, id : haveId}, i }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -210,9 +210,7 @@ func Bitfield(bits []byte) *BitfieldMessage {
 
 type RequestMessage struct {
 	msg
-	index uint32
-	begin uint32
-	length uint32
+	index, begin, length uint32
 }
 
 func (m RequestMessage) Index() uint32 {
@@ -231,12 +229,12 @@ func (m RequestMessage) String() string {
 	return fmt.Sprintf("Request [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
 }
 
-func Request(index int, begin int, length int) *RequestMessage {
+func Request(index, begin, length uint32) *RequestMessage {
 	return &RequestMessage {
 		msg { len : requestLength, id : requestId },
-		uint32(index),
-		uint32(begin),
-		uint32(length),
+		index,
+		begin,
+		length,
 	}
 }
 
@@ -244,34 +242,33 @@ func Request(index int, begin int, length int) *RequestMessage {
 // Piece <len=0009+X><id=7><index><begin><block>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type PieceMessage struct {
+type BlockMessage struct {
 	msg
-	index uint32
-	begin uint32
+	index, begin uint32
 	block []byte
 }
 
-func (m PieceMessage) Index() uint32 {
+func (m BlockMessage) Index() uint32 {
 	return m.index
 }
 
-func (m PieceMessage) Begin() uint32 {
+func (m BlockMessage) Begin() uint32 {
 	return m.begin
 }
 
-func (m PieceMessage) Block() []uint8 {
+func (m BlockMessage) Block() []uint8 {
 	return m.block
 }
 
-func (m PieceMessage) String() string {
-	return fmt.Sprintf("Request [index:%v, begin:%v, data:%x]", m.index, m.begin, m.block)
+func (m BlockMessage) String() string {
+	return fmt.Sprintf("Block [index:%v, begin:%v, %x...]", m.index, m.begin, m.block[0:10])
 }
 
-func Piece(index int, begin int, block []byte) *PieceMessage {
-	return &PieceMessage {
-		msg { len : uint32(9+len(block)), id : pieceId },
-		uint32(index),
-		uint32(begin),
+func Block(index, begin uint32, block []byte) *BlockMessage {
+	return &BlockMessage {
+		msg { len : uint32(9+len(block)), id : blockId },
+		index,
+		begin,
 		block,
 	}
 }
@@ -282,9 +279,7 @@ func Piece(index int, begin int, block []byte) *PieceMessage {
 
 type CancelMessage struct {
 	msg
-	index uint32
-	begin uint32
-	length uint32
+	index, begin, length uint32
 }
 
 func (m CancelMessage) Index() uint32 {
@@ -303,12 +298,12 @@ func (m CancelMessage) String() string {
 	return fmt.Sprintf("Request [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
 }
 
-func Cancel(index int, begin int, length int) *CancelMessage {
+func Cancel(index, begin, length uint32) *CancelMessage {
 	return &CancelMessage {
 		msg { len : cancelLength, id : cancelId },
-		uint32(index),
-		uint32(begin),
-		uint32(length),
+		index,
+		begin,
+		length,
 	}
 }
 
@@ -338,7 +333,7 @@ func Marshal(pm ProtocolMessage) []byte {
 	// Encode struct
 	w := bytes.NewBuffer(make([]byte, 0, pm.Len()+4))
 	switch msg := pm.(type) {
-	case *PieceMessage:
+	case *BlockMessage:
 		marshal(w, binary.BigEndian, msg.len)
 		marshal(w, binary.BigEndian, msg.id)
 		marshal(w, binary.BigEndian, msg.index)
@@ -372,7 +367,7 @@ func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {
 	}
 
 	// Check: Keepalive
-	msgLen := toUint64(buf[0:4])
+	msgLen := toUint32(buf[0:4])
 	remainingBuf := buf[4:]
 	if msgLen == 0 {
 		return remainingBuf, KeepAliveMessage
@@ -396,37 +391,37 @@ func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {
 	case interestedId: return remainingBuf, Interested
 	case uninterestedId: return remainingBuf, Uninterested
 	case haveId:
-		index := toUint64(data)
-		return remainingBuf, Have(int(index))
+		index := toUint32(data)
+		return remainingBuf, Have(index)
 	case bitfieldId:
 		return remainingBuf, Bitfield(data)
 	case requestId:
-		index := toUint64(data[0:4])
-		begin := toUint64(data[4:8])
-		length := toUint64(data[8:12])
-		return remainingBuf, Request(int(index), int(begin), int(length))
-	case pieceId:
-		index := toUint64(data[0:4])
-		begin:= toUint64(data[4:8])
-		return remainingBuf, Piece(int(index), int(begin), data[8:])
+		index := toUint32(data[0:4])
+		begin := toUint32(data[4:8])
+		length := toUint32(data[8:12])
+		return remainingBuf, Request(index, begin, length)
+	case blockId:
+		index := toUint32(data[0:4])
+		begin:= toUint32(data[4:8])
+		return remainingBuf, Block(index, begin, data[8:])
 	case cancelId:
-		index := toUint64(data[0:4])
-		begin := toUint64(data[4:8])
-		length := toUint64(data[8:12])
-		return remainingBuf, Cancel(int(index), int(begin), int(length))
+		index := toUint32(data[0:4])
+		begin := toUint32(data[4:8])
+		length := toUint32(data[8:12])
+		return remainingBuf, Cancel(index, begin, length)
 	default:
 		fmt.Printf("Unknown message: %v", data)
 		return remainingBuf, nil
 	}
 }
 
-func toUint64(bytes []byte) uint64 {
+func toUint32(bytes []byte) uint32 {
 
-	var a uint64
+	var a uint32
 	l := len(bytes)
 	for i, b := range bytes {
-		shift := uint64((l-i-1) * 8)
-		a |= uint64(b) << shift
+		shift := uint32((l-i-1) * 8)
+		a |= uint32(b) << shift
 	}
 	return a
 }

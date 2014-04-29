@@ -37,11 +37,11 @@ var (
 
 type MetaInfo struct {
 	Announce     string
-	CreationDate int64
+	CreationDate uint64
 	Comment      string
 	CreatedBy    string
 	Encoding     string
-	PieceLength  int64
+	PieceLength  uint32
 	Hashes       [][]byte
 	Private      bool
 	Files        []MetaInfoFile
@@ -51,14 +51,14 @@ type MetaInfo struct {
 type MetaInfoFile struct {
 	Path     string
 	Name     string
-	Length   int64
+	Length   uint64
 	CheckSum []byte
 }
 
 // Returns the total length of file data. In multi-file mode this is the
 // length of all files added together
-func (mi *MetaInfo) TotalLength() int64 {
-	var totalLength int64
+func (mi *MetaInfo) TotalLength() uint64 {
+	var totalLength uint64
 	for i := range mi.Files {
 		totalLength += mi.Files[i].Length
 	}
@@ -88,11 +88,11 @@ func NewMetaInfo(r io.Reader) (mi *MetaInfo, err error) {
 	// Build meta info
 	mi = &MetaInfo {
 		Announce		: bs(bdata, announce),
-		CreationDate	: optI(bdata, creationDate),
+		CreationDate	: uint64(optI(bdata, creationDate)),
 		Comment:      	optBs(bdata, comment),
 		CreatedBy:      optBs(bdata, createdBy),
 		Encoding:		optBs(bdata, encoding),
-		PieceLength:	i(d(bdata, info), pieceLength),
+		PieceLength:	uint32(i(d(bdata, info), pieceLength)),
 		Hashes:			toSha1Hashes(bs(d(bdata, info), pieces)),
 		Private:		optI(d(bdata, info), private) != 0,
 		Files:			toMetaInfoFiles(d(bdata, info)),
@@ -113,7 +113,7 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 			MetaInfoFile {
 				Path:      "/",
 				Name:      name,
-				Length:    i(info, length),
+				Length:    uint64(i(info, length)),
 				CheckSum: []byte(optBs(info, md5sum)),
 			}}
 	}
@@ -129,7 +129,7 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 			MetaInfoFile {
 				Path:      name+"/"+joinStrings(path[:len(path)-1], "/"),
 				Name:      path[len(path)-1].(string),
-				Length:    i(miFile, length),
+				Length:    uint64(i(miFile, length)),
 				CheckSum: []byte(optBs(miFile, md5sum)),
 			})
 	}

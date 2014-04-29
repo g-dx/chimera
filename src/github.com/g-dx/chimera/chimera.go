@@ -62,47 +62,11 @@ func main() {
 	}
 	fmt.Printf("Tracker Respose: %+v\n ", resp)
 
-
-//	buffer := new(bytes.Buffer)
-//	bittorrent.Marshal(buffer, bittorrent.Choke)
-//	fmt.Printf("Choke:%v\n", buffer.Bytes())
-//	buffer.Reset()
-//
-//	bittorrent.Marshal(buffer, bittorrent.Unchoke)
-//	fmt.Printf("Unchoke:%v\n", buffer.Bytes())
-//	buffer.Reset()
-//
-//	bittorrent.Marshal(buffer, bittorrent.Interested)
-//	fmt.Printf("Interested:%v\n", buffer.Bytes())
-//	buffer.Reset()
-//
-//	bittorrent.Marshal(buffer, bittorrent.Uninterested)
-//	fmt.Printf("Uninterested:%v\n", buffer.Bytes())
-//	buffer.Reset()
-//
-//	bittorrent.Marshal(buffer, bittorrent.Have(len(buf)))
-//	fmt.Printf("Have:%v\n", buffer.Bytes())
-//	buffer.Reset()
-//
-//	bittorrent.Marshal(buffer, bittorrent.Bitfield([]byte {0xFF, 0xAA, 0x34, 0x99, 0xDC}))
-//	fmt.Printf("Bitfield:%v\n", buffer.Bytes())
-//	buffer.Reset()
-//
-//	bittorrent.Marshal(buffer, bittorrent.Request(23, 90, 12))
-//	fmt.Printf("Request:%v\n", buffer.Bytes())
-//	buffer.Reset()
-//
-//	bittorrent.Marshal(buffer, bittorrent.Piece(23, 90, []byte {11, 34, 123, 45, 90}))
-//	fmt.Printf("Piece:%v\n", buffer.Bytes())
-//	buffer.Reset()
-//
-//	bittorrent.Marshal(buffer, bittorrent.Cancel(23, 90, 12))
-//	fmt.Printf("Cancel:%v\n", buffer.Bytes())
-//	buffer.Reset()
-
 	// Create log directory
-	dir := fmt.Sprintf("/Users/Dakeyras/.chimera/%v [...%x]", time.Now().Format("2006-01-02 15.04.05"), mi.InfoHash[15:])
-	err := os.Mkdir(dir, os.ModeDir | os.ModePerm)
+	dir := fmt.Sprintf("/Users/Dakeyras/.chimera/%v [...%x]",
+		               time.Now().Format("2006-01-02 15.04.05"),
+		               metaInfo.InfoHash[15:])
+	err = os.Mkdir(dir, os.ModeDir | os.ModePerm)
 	if err != nil {
 		fmt.Printf("Failed to create torrent dir: %v\n", err)
 	}
