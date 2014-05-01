@@ -1,8 +1,8 @@
 package bittorrent
 
 const (
-	_16KB_BLOCK = uint32(16 * 1024)
-	_128KB_BLOCK = uint32(128 * 1024)
+	_16KB = uint32(16 * 1024)
+	_128KB = uint32(128 * 1024)
 )
 
 type PieceMap struct {
@@ -54,15 +54,21 @@ func (pm * PieceMap) DecAll(bits *BitSet) {
 }
 
 func (pm * PieceMap) IsValid(index, begin, length uint32) bool {
-//	if index >= uint32(len(pm.pieces)) {
-//		return false
-//	}
-//	piece := pm.pieces[index]
-//
-//	if length != begin + piece.BlockLen(index) {
-//		return false
-//	}
-	// TODO: Correct me!
+	// 1. index valid
+	if index >= uint32(len(pm.pieces)) {
+		return false
+	}
+
+	// 2. begin + length < size
+	piece := pm.pieces[index]
+	if begin + length >= piece.Length() {
+		return false
+	}
+
+	// 3. length < 2^18 (minimum piece size)
+	if length >= _128KB {
+		return false
+	}
 	return true
 }
 
@@ -73,7 +79,7 @@ func (pm * PieceMap) Piece(i uint32) *Piece {
 func (p * PieceMap) ReturnBlocks(reqs []*RequestMessage) {
 	for _, req := range reqs {
 		// Reset block state to needed and ensure overall piece state is blocks needed
-		p.pieces[req.Index()].blocks[req.Begin()%_16KB_BLOCK] = NEEDED
+		p.pieces[req.Index()].blocks[req.Begin()%_16KB] = NEEDED
 		p.pieces[req.Index()].state = BLOCKS_NEEDED
 	}
 }
@@ -103,11 +109,11 @@ type Piece struct {
 func NewPiece(i, len uint32) *Piece {
 
 	// Calculate number of blocks & size of last block
-	n := len / _16KB_BLOCK
-	lastBlockLen := _16KB_BLOCK
-	if len % _16KB_BLOCK != 0 {
+	n := len / _16KB
+	lastBlockLen := _16KB
+	if len % _16KB != 0 {
 		n++
-		lastBlockLen = len % _16KB_BLOCK
+		lastBlockLen = len % _16KB
 	}
 
 	// Init all block state to required
@@ -127,6 +133,10 @@ func (p Piece) BlocksNeeded() bool {
 	return p.state == BLOCKS_NEEDED
 }
 
+func (p Piece) Length() uint32 {
+	return p.len
+}
+
 func (p * Piece) TakeBlocks(n uint) []*RequestMessage {
 
 	blocks := make([]*RequestMessage, 0, 5)
@@ -136,7 +146,7 @@ func (p * Piece) TakeBlocks(n uint) []*RequestMessage {
 		// Take this block if we still need blocks
 		if s == NEEDED && uint(len(blocks)) != n {
 			p.blocks[i] = REQUESTED
-			blocks = append(blocks, Request(p.index, uint32(i) * _16KB_BLOCK, _16KB_BLOCK))
+			blocks = append(blocks, Request(p.index, uint32(i) * _16KB, _16KB))
 		}
 
 		// Keep track of the overall piece a
@@ -151,7 +161,7 @@ func (p * Piece) TakeBlocks(n uint) []*RequestMessage {
 }
 
 func (p Piece) BlockLen(i uint32) uint32 {
-	blockLen := _16KB_BLOCK
+	blockLen := _16KB
 	if uint32(len(p.blocks)-1) == i {
 		blockLen = p.lastBlockLen
 	}
