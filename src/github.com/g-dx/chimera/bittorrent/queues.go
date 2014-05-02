@@ -1,9 +1,9 @@
 package bittorrent
 
 type PeerRequestQueue struct {
-	new []*RequestMessage
-	pending []*RequestMessage
-	received  []*BlockMessage
+	new      []*RequestMessage
+	pending  []*RequestMessage
+	received []*BlockMessage
 	max int
 }
 
@@ -15,10 +15,17 @@ func NewPeerRequestQueue(max int) *PeerRequestQueue {
 	}
 }
 
-func (pq * PeerRequestQueue) Clear() {
+func (pq * PeerRequestQueue) Clear() []*RequestMessage {
+
+	// Collect all outstanding requests
+	var reqs []*RequestMessage
+	reqs = append(reqs, pq.new...)
+	reqs = append(reqs, pq.pending...)
+
 	// NOTE: This does not make the elements of the slice eligible for GC!
 	pq.new = pq.new[:0]
 	pq.pending = pq.pending[:0]
+	return reqs
 }
 
 func (pq * PeerRequestQueue) Remove(index, begin, length uint32) bool {
@@ -40,18 +47,26 @@ func (pq * PeerRequestQueue) Remove(index, begin, length uint32) bool {
 }
 
 func (pq * PeerRequestQueue) IsFull() bool {
-	return len(pq.new) + len(pq.pending) < pq.max
+	return pq.Size() < pq.max
 }
 
-func (pq * PeerRequestQueue) AddRequest(index, begin, length uint32) {
-	pq.new = append(pq.new, Request(index, begin, length))
+func (pq * PeerRequestQueue) Size() int {
+	return len(pq.new) + len(pq.pending)
 }
 
-func (pq * PeerRequestQueue) AddBlock(index, begin uint32, block []byte) {
-	// If not in "pending" queue - discard...
+func (pq * PeerRequestQueue) Capacity() int {
+	return pq.max
 }
 
-func (pq * PeerRequestQueue) PumpQueue(in *RequestMessage, out chan *BlockMessage) {
+func (pq * PeerRequestQueue) AddRequest(r * RequestMessage) {
+	pq.new = append(pq.new, r)
+}
+
+func (pq * PeerRequestQueue) AddBlock(b * BlockMessage) {
+	// TODO: If not in pending queue - discard...
+}
+
+func (pq * PeerRequestQueue) Pump(reqs, blocks chan<- ProtocolMessage,) {
 
 	// REMOTE PEER => in (disk), out (outgoing buffer)
 	// LOCAL PEER  => in (outgoing buffer), out(disk)
@@ -60,3 +75,27 @@ func (pq * PeerRequestQueue) PumpQueue(in *RequestMessage, out chan *BlockMessag
 
 	// Pump blocks to "out"
 }
+
+
+//func (p * Peer) MaybeReadBlock(diskReader chan RequestMessage) {
+//	if len(p.remotePendingReads) > 0 {
+//		select {
+//		case diskReader <- *p.remotePendingReads[0]:
+//			p.remoteSubmittedReads = append(p.remoteSubmittedReads, p.remotePendingReads[0])
+//			p.remotePendingReads = p.remotePendingReads[1:]
+//		default:
+//			// Non-blocking read...
+//		}
+//	}
+//}
+//
+//func (p * Peer) MaybeWriteBlock(diskWriter chan BlockMessage) {
+//	if len(p.localPendingWrites) > 0 {
+//		select {
+//		case diskWriter <- *p.localPendingWrites[0]:
+//			p.localPendingWrites = p.localPendingWrites[1:]
+//		default:
+//			// Non-blocking write...
+//		}
+//	}
+//}

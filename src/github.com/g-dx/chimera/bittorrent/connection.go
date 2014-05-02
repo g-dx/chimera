@@ -27,6 +27,8 @@ var (
 		errors.New(fmt.Sprintf("Handshake not received in: %v", HANDSHAKE_TIMEOUT))
 	errFirstMessageNotHandshake =
 		errors.New("First message is not handshake")
+	errKeepAliveExpired =
+		errors.New("Read KeepAlive expired")
 )
 
 type PeerIdentity struct {
@@ -53,7 +55,6 @@ func NewConnection(addr string) (*PeerConnection, error) {
 		return nil, err
 	}
 
-	// TODO: Fix this close logic...
 	c := make(chan struct{}, 2) // 2 close messages - one for reader, other for writer
 	pc := &PeerConnection{
 		close : c,
@@ -87,9 +88,9 @@ func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
 	if err != nil {
 		return nil, err
 	}
-	pc.in.logger  = log.New(f, " -> [in]  ", log.Ldate | log.Ltime)
-	pc.out.logger = log.New(f, " <- [out] ", log.Ldate | log.Ltime)
-	pc.logger     = log.New(f, " -- [con]", log.Ldate | log.Ltime)
+	pc.in.logger  = log.New(f, " in  ->", log.Ldate | log.Ltime)
+	pc.out.logger = log.New(f, " out <-", log.Ldate | log.Ltime)
+	pc.logger     = log.New(f, "  -  --", log.Ldate | log.Ltime)
 
 	// Ensure we handshake properly
 	id, err := pc.completeHandshake(handshake)
@@ -154,7 +155,6 @@ func (pc *PeerConnection) Close() error {
 
 	pc.logger.Println("Closing connection")
 
-	// TODO: Should a channel be passed here to ensure a synchronous close?
 	// Shutdown reader & writer
 	pc.close <- struct{}{}
 	pc.close <- struct{}{}
@@ -183,14 +183,16 @@ type IncomingPeerConnection struct {
 	logger *log.Logger
 }
 
-func (ic * IncomingPeerConnection) loop(c chan<- error) {
-	defer onExit(c)
+func (ic * IncomingPeerConnection) loop(err chan<- error) {
+	defer onLoopExit(err)
 	var keepAlive = time.After(KEEP_ALIVE_PERIOD)
 	for {
 		c, next := ic.maybeEnableSend()
 		select {
 		case <- ic.close: break
-		case <- keepAlive: // TODO: Close the connection!
+		case <- keepAlive:
+			err <- errKeepAliveExpired
+			break
 		case c <- next: ic.pending = ic.pending[1:]
 		default:
 			if n := ic.readOrSleepFor(ONE_SECOND); n > 0 {
@@ -260,8 +262,8 @@ type OutgoingPeerConnection struct {
 	logger *log.Logger
 }
 
-func (oc * OutgoingPeerConnection) loop(c chan<- error) {
-	defer onExit(c)
+func (oc * OutgoingPeerConnection) loop(err chan<- error) {
+	defer onLoopExit(err)
 	var keepAlive = time.After(KEEP_ALIVE_PERIOD)
 	for {
 		c := oc.maybeEnableReceive()
@@ -319,7 +321,7 @@ func (oc * OutgoingPeerConnection) hasDataToWrite() bool {
 	return len(oc.curr) > 0 || len(oc.pending) > 0
 }
 
-func onExit(c chan<- error) {
+func onLoopExit(c chan<- error) {
 	if r := recover(); r != nil {
 		if _, ok := r.(runtime.Error); ok {
 			panic(r)
@@ -333,9 +335,7 @@ func write(w io.Writer, buf []byte) ([]byte, int, bool) {
 	timeout := false
 	n, err := w.Write(buf)
 	if nil != err {
-		if opErr, ok := err.(*net.OpError); (ok && !opErr.Timeout() || !ok) {
-			panic(err)
-		}
+		panicIfNotTimeout(err)
 		timeout = true
 	}
 	return buf[n:], n, timeout
@@ -346,9 +346,14 @@ func read(r io.Reader) ([]byte, int) {
 	buf := make([]byte, READ_BUFFER_SIZE)
 	n, err := r.Read(buf)
 	if nil != err {
-		if opErr, ok := err.(*net.OpError); (ok && !opErr.Timeout() || !ok) {
-			panic(err)
-		}
+		panicIfNotTimeout(err)
 	}
 	return buf[:n], n
+}
+
+// Panic if the error is not a timeout
+func panicIfNotTimeout(err error) {
+	if opErr, ok := err.(*net.OpError); (ok && !opErr.Timeout() || !ok) {
+		panic(err)
+	}
 }
