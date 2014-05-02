@@ -20,10 +20,9 @@ func (ob * OutgoingBuffer) Add(msg ProtocolMessage) {
 
 func (ob * OutgoingBuffer) Pump(max int) int {
 	n := 0
-	for i := 0 ; i < max ; i++ {
-		out := MaybeEnable(ob.c, func() bool { return len(ob.buffer) > 0 })
+	for i := 0 ; len(ob.buffer) > 0 && i < max ; i++ {
 		select {
-		case out <- ob.buffer[0]:
+		case ob.c <- ob.buffer[0]:
 			ob.buffer = ob.buffer[1:]
 			n++
 		default: break
