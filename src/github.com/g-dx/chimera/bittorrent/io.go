@@ -109,7 +109,18 @@ func (pq * PeerRequestQueue) AddBlock(b * BlockMessage) {
 	// TODO: If not in pending queue - discard...
 }
 
-func (pq * PeerRequestQueue) Pump() {
+func (pq * PeerRequestQueue) Drain(requests, blocks * OutgoingBuffer) {
 
-	// TODO: Use incoming and outgoing buffers as destinations
+	// Pump requests out
+	if len(pq.new) > 0 {
+		requests.Add(pq.new[0])
+		pq.pending = append(pq.pending, pq.new[0])
+		pq.new = pq.new[1:]
+	}
+
+	// Pump blocks out
+	if len(pq.received) > 0 {
+		blocks.Add(pq.received[0])
+		pq.received = pq.received[1:]
+	}
 }

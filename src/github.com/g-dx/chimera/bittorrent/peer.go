@@ -12,6 +12,9 @@ const (
 
 	// Max number of messages to write during "Process"
 	maxMessageWrites = 5
+
+	// Max number of disk reads during "Process"
+	maxDiskReads = 5
 )
 
 type ProtocolHandler interface {
@@ -46,7 +49,8 @@ func (s * Statistics) Downloaded(n uint) {
 type Peer struct {
 
 	// Outgoing message buffer
-	out OutgoingBuffer
+	out, disk * OutgoingBuffer
+
 
 	// Request queues
 	remoteQ, localQ * PeerRequestQueue
@@ -74,7 +78,7 @@ type Peer struct {
 }
 
 func NewPeer(id PeerIdentity,
-		     out chan<- ProtocolMessage,
+		     out, disk chan<- ProtocolMessage,
 			 in <-chan ProtocolMessage,
 			 mi * MetaInfo,
 	         pieceMap *PieceMap,
@@ -83,6 +87,7 @@ func NewPeer(id PeerIdentity,
 			 onCloseFn func(error)) *Peer {
 	return &Peer {
 		out : NewOutgoingBuffer(out, maxOutstandingLocalRequests),
+		disk : NewOutgoingBuffer(disk, maxOutstandingLocalRequests),
 		remoteQ : NewPeerRequestQueue(maxRemoteRequestQueue),
 		localQ : NewPeerRequestQueue(maxOutstandingLocalRequests),
 		in : in,
@@ -205,7 +210,7 @@ func (p * Peer) Bitfield(bits []byte) {
 	}
 }
 
-func (p * Peer) ProcessMessages(diskIn chan<- *RequestMessage, diskOut chan<- *BlockMessage) int {
+	func (p * Peer) ProcessMessages() int {
 
 	// Number of operations we performed
 	ops := 0
@@ -227,12 +232,13 @@ func (p * Peer) ProcessMessages(diskIn chan<- *RequestMessage, diskOut chan<- *B
 	default:
 	}
 
-	// Process read & write requests (if any)
-	p.remoteQ.Pump(diskIn, p.out)
-	p.localQ.Pump(p.out, diskOut)
+	// Drain requests & blocks to appropriate destinations
+	p.remoteQ.Drain(p.disk, p.out)
+	p.localQ.Drain(p.out, p.disk)
 
-	// Pump write queue
+	// Pump disk & out queue
 	ops += p.out.Pump(maxMessageWrites)
+	ops += p.disk.Pump(maxDiskReads)
 
 	return ops
 }
