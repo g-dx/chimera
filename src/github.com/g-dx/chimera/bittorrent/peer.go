@@ -48,9 +48,8 @@ func (s * Statistics) Downloaded(n uint) {
 
 type Peer struct {
 
-	// Outgoing message buffer
+	// Outgoing protocol & disk buffers
 	out, disk * OutgoingBuffer
-
 
 	// Request queues
 	remoteQ, localQ * PeerRequestQueue
@@ -86,10 +85,10 @@ func NewPeer(id PeerIdentity,
 			 logger * log.Logger,
 			 onCloseFn func(error)) *Peer {
 	return &Peer {
-		out : NewOutgoingBuffer(out, maxOutstandingLocalRequests),
-		disk : NewOutgoingBuffer(disk, maxOutstandingLocalRequests),
+		out     : NewOutgoingBuffer(out, maxOutstandingLocalRequests),
+		disk    : NewOutgoingBuffer(disk, maxOutstandingLocalRequests),
 		remoteQ : NewPeerRequestQueue(maxRemoteRequestQueue),
-		localQ : NewPeerRequestQueue(maxOutstandingLocalRequests),
+		localQ  : NewPeerRequestQueue(maxOutstandingLocalRequests),
 		in : in,
 		pieceMap : pieceMap,
 		state : NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),

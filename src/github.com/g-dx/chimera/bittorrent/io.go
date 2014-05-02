@@ -29,7 +29,7 @@ func (ob * OutgoingBuffer) Pump(max int) int {
 		case ob.c <- ob.buffer[0]:
 			ob.buffer = ob.buffer[1:]
 			n++
-		default: break
+		default: break // Non-blocking...
 		}
 	}
 	return n
@@ -111,14 +111,16 @@ func (pq * PeerRequestQueue) AddBlock(b * BlockMessage) {
 
 func (pq * PeerRequestQueue) Drain(requests, blocks * OutgoingBuffer) {
 
-	// Pump requests out
+	// Drain requests out
+	// TODO: Should we drain the entire queue?
 	if len(pq.new) > 0 {
 		requests.Add(pq.new[0])
 		pq.pending = append(pq.pending, pq.new[0])
 		pq.new = pq.new[1:]
 	}
 
-	// Pump blocks out
+	// Drain blocks out
+	// TODO: Should we drain the entire queue?
 	if len(pq.received) > 0 {
 		blocks.Add(pq.received[0])
 		pq.received = pq.received[1:]

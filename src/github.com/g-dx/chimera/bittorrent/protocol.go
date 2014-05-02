@@ -22,8 +22,7 @@ type PeerCoordinator struct {
 	done chan struct{}
 	dir string
 	logger *log.Logger
-	reader chan *RequestMessage
-	writer chan *BlockMessage
+	diskR chan<- ProtocolMessage
 }
 
 func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*PeerCoordinator, error) {
@@ -37,9 +36,8 @@ func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 	logger := log.New(f, "", log.Ldate | log.Ltime)
 
 	// Start fake disk reader
-	diskWriter := make(chan *BlockMessage)
-	diskReader := make(chan *RequestMessage)
-	go mockDisk(diskReader, diskWriter, logger)
+	diskR := make(chan<- ProtocolMessage)
+	go mockDisk(diskR, logger)
 
 
 	// Create piece map
@@ -55,8 +53,7 @@ func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 		done : make(chan struct{}),
 		dir : dir,
 		logger : logger,
-		reader : diskReader,
-		writer : diskWriter,
+		diskR : diskR,
 	}
 
 	// Start loop & return
@@ -137,8 +134,8 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 		return
 	}
 
-	in := make(chan ProtocolMessage, 10)
-	out := make(chan ProtocolMessage, 10)
+	in := make(<-chan ProtocolMessage, 10)
+	out := make(chan<- ProtocolMessage, 10)
 	e := make(chan error, 3) // error sources -> reader, writer, peer
 	outHandshake := Handshake(pc.metaInfo.InfoHash)
 
@@ -167,7 +164,7 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 	}
 
 	// Connected
-	p := NewPeer(*id, in, out, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
+	p := NewPeer(*id, out, pc.diskR, in, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
 	pc.logger.Printf("New Peer: %v\n", p)
 	pc.addPeer <- p
 }
