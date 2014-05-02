@@ -5,10 +5,13 @@ import (
 	"log"
 )
 
-var (
+const (
 	maxOutgoingQueue = 25
 	maxRemoteRequestQueue = 10
 	maxOutstandingLocalRequests = 10
+
+	// Max number of messages to write during "Process"
+	maxMessageWrites = 5
 )
 
 type ProtocolHandler interface {
@@ -43,24 +46,30 @@ func (s * Statistics) Downloaded(n uint) {
 type Peer struct {
 
 	// Outgoing message buffer
-	buffer []ProtocolMessage
+	out OutgoingBuffer
 
 	// Request queues
 	remoteQ, localQ * PeerRequestQueue
 
 	// Incoming, outgoing & connection error channels
 	in  <-chan ProtocolMessage
-	out chan<- ProtocolMessage
 	err <-chan error
 
-	pieceMap *PieceMap
-	bitfield *BitSet
+	// State of peer
 	state PeerState
+
+	// Overall torrent piece map
+	pieceMap *PieceMap
+
+	//
 	id PeerIdentity
-	stats * Statistics
+
+	// Peer statistics concerning upload, download, etc...
+	statistics * Statistics
 
 	logger * log.Logger
 
+	// Cleanup function called on close
 	onCloseFn func(error)
 }
 
@@ -73,32 +82,32 @@ func NewPeer(id PeerIdentity,
 			 logger * log.Logger,
 			 onCloseFn func(error)) *Peer {
 	return &Peer {
-		buffer : make([]ProtocolMessage, 0, 25),
+		out : NewOutgoingBuffer(out, maxOutstandingLocalRequests),
 		remoteQ : NewPeerRequestQueue(maxRemoteRequestQueue),
 		localQ : NewPeerRequestQueue(maxOutstandingLocalRequests),
-		out : out,
 		in : in,
 		pieceMap : pieceMap,
-		bitfield : NewBitSet(uint32(len(mi.Hashes))),
-		state : NewPeerState(),
+		state : NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
 		id : id,
 		logger : logger,
 		err : e,
-		stats : new(Statistics),
+		statistics : new(Statistics),
 		onCloseFn : onCloseFn,
 	}
 }
 
 type PeerState struct {
 	remoteChoke, localChoke, remoteInterest, localInterest bool
+	bitfield *BitSet
 }
 
-func NewPeerState() PeerState {
+func NewPeerState(bits *BitSet) PeerState {
 	return PeerState {
 		remoteChoke : true,
 		localChoke : true,
 		remoteInterest : false,
 		localInterest : false,
+		bitfield : bits,
 	}
 }
 
@@ -109,7 +118,7 @@ func (p * Peer) handleMessage(pm ProtocolMessage) {
 	case *UnchokeMessage: p.Unchoke()
 	case *InterestedMessage: p.Interested()
 	case *UninterestedMessage: p.Uninterested()
-	case *BitfieldMessage: p.Bitfield(msg.Bits())
+	case *BitfieldMessage: p.state.bitfield(msg.Bits())
 	case *HaveMessage: p.Have(msg.Index())
 	case *CancelMessage: p.Cancel(msg.Index(), msg.Begin(), msg.Length())
 	case *RequestMessage: p.Request(msg.Index(), msg.Begin(), msg.Length())
@@ -129,7 +138,7 @@ func (p * Peer) Unchoke() {
 }
 
 func (p * Peer) Interested() {
-	p.state.remoteInterest = !p.bitfield.IsComplete()
+	p.state.remoteInterest = !p.state.bitfield.IsComplete()
 }
 
 func (p * Peer) Uninterested() {
@@ -137,14 +146,14 @@ func (p * Peer) Uninterested() {
 }
 
 func (p * Peer) Have(index uint32) {
-	if !p.bitfield.IsValid(index) {
+	if !p.state.bitfield.IsValid(index) {
 		p.Close(newError("Invalid index received: %v", index))
 	}
 
-	if !p.bitfield.Have(index) {
+	if !p.state.bitfield.Have(index) {
 
-		p.bitfield.Set(index)
-		p.state.remoteInterest = !p.bitfield.IsComplete()
+		p.state.bitfield.Set(index)
+		p.state.remoteInterest = !p.state.bitfield.IsComplete()
 		p.pieceMap.Inc(index)
 
 		if p.isNowInteresting(index) {
@@ -179,16 +188,16 @@ func (p * Peer) Block(index, begin uint32, block []byte) {
 func (p * Peer) Bitfield(bits []byte) {
 	// Create new bitfield
 	var err error
-	p.bitfield, err = NewFromBytes(bits, p.bitfield.Size())
+	p.state.bitfield, err = NewFromBytes(bits, p.state.bitfield.Size())
 	if err != nil {
 		p.Close(err)
 	}
 
 	// Add to global piece map
-	p.pieceMap.IncAll(p.bitfield)
+	p.pieceMap.IncAll(p.state.bitfield)
 
 	// Check if we are interested
-	for i := uint32(0); i < p.bitfield.Size(); i++ {
+	for i := uint32(0); i < p.state.bitfield.Size(); i++ {
 		if p.pieceMap.Piece(i).BlocksNeeded() {
 			p.state.localInterest = true
 			break
@@ -210,7 +219,7 @@ func (p * Peer) ProcessMessages(diskIn chan<- *RequestMessage, diskOut chan<- *B
 	}
 
 	// Enable message read if we have space
-	in := p.MaybeEnableMessageRead()
+	in := MaybeEnable(p.in, func() bool { return !p.remoteQ.IsFull() && len(p.buffer) < maxOutgoingQueue })
 	select {
 	case msg := <- in:
 		p.handleMessage(msg)
@@ -222,37 +231,13 @@ func (p * Peer) ProcessMessages(diskIn chan<- *RequestMessage, diskOut chan<- *B
 	p.remoteQ.Pump(diskIn, p.out)
 	p.localQ.Pump(p.out, diskOut)
 
-
-	// Enable message write based on queue sizes
-	out := p.MaybeEnableMessageWrite()
-	select {
-	case out <- p.buffer[0]:
-		p.buffer = p.buffer[1:]
-		ops++
-	default:
-	}
+	// Pump write queue
+	ops += p.out.Pump(maxMessageWrites)
 
 	return ops
 }
-
-func (p * Peer) MaybeEnableMessageWrite() chan<- ProtocolMessage {
-	var c chan<- ProtocolMessage
-	if len(p.buffer) > 0 {
-		c = p.out
-	}
-	return c
-}
-
-func (p * Peer) MaybeEnableMessageRead() <-chan ProtocolMessage {
-	var c <-chan ProtocolMessage
-	if !p.remoteQ.IsFull() && len(p.buffer) < maxOutgoingQueue {
-		c = p.in
-	}
-	return c
-}
-
 func (p Peer) Statistics() *Statistics {
-	return p.stats
+	return p.statistics
 }
 
 func (p * Peer) isNowInteresting(index uint32) bool {
@@ -262,7 +247,7 @@ func (p * Peer) isNowInteresting(index uint32) bool {
 func (p * Peer) Close(err error) {
 
 	// Update piece map
-	p.pieceMap.DecAll(p.bitfield)
+	p.pieceMap.DecAll(p.state.bitfield)
 
 	// Return outstanding blocks
 	p.pieceMap.ReturnBlocks(p.localQ.Clear())
