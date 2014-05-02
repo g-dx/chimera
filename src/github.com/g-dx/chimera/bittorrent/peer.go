@@ -157,7 +157,7 @@ func (p * Peer) Have(index uint32) {
 		p.pieceMap.Inc(index)
 
 		if p.isNowInteresting(index) {
-			p.buffer = append(p.buffer, Interested)
+			p.out.Add(Interested)
 		}
 	}
 }
@@ -178,7 +178,7 @@ func (p * Peer) Request(index, begin, length uint32) {
 
 func (p * Peer) Block(index, begin uint32, block []byte) {
 	if !p.pieceMap.IsValid(index, begin, uint32(len(block))) {
-		p.Close(newError("Invalid piece received: %v, %v, %v", index, begin, block))
+		p.Close(newError("Invalid block received: %v, %v, %v", index, begin, block))
 	}
 
 	p.localQ.AddBlock(Block(index, begin, block))
@@ -219,7 +219,7 @@ func (p * Peer) ProcessMessages(diskIn chan<- *RequestMessage, diskOut chan<- *B
 	}
 
 	// Enable message read if we have space
-	in := MaybeEnable(p.in, func() bool { return !p.remoteQ.IsFull() && len(p.buffer) < maxOutgoingQueue })
+	in := MaybeEnable(p.in, func() bool { return !p.remoteQ.IsFull() && p.out.Size() < maxOutgoingQueue })
 	select {
 	case msg := <- in:
 		p.handleMessage(msg)
