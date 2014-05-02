@@ -14,6 +14,10 @@ func NewOutgoingBuffer(c chan<- ProtocolMessage, cap int) *OutgoingBuffer {
 	}
 }
 
+func (ob * OutgoingBuffer) Size() int {
+	return len(ob.buffer)
+}
+
 func (ob * OutgoingBuffer) Add(msg ProtocolMessage) {
 	ob.buffer = append(ob.buffer, msg)
 }
