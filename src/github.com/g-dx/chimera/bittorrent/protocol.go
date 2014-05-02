@@ -103,7 +103,7 @@ func (pc * PeerCoordinator) processMessagesFor(d time.Duration) {
 
 		msgs := 0
 		for _, p := range pc.peers {
-			msgs += p.ProcessMessages(pc.reader, pc.writer)
+			msgs += p.ProcessMessages()
 		}
 
 		// If we did nothing this loop - wait for more data to arrive
