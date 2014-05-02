@@ -4,14 +4,14 @@ type PeerRequestQueue struct {
 	new      []*RequestMessage
 	pending  []*RequestMessage
 	received []*BlockMessage
-	max int
+	cap int
 }
 
-func NewPeerRequestQueue(max int) *PeerRequestQueue {
+func NewPeerRequestQueue(cap int) *PeerRequestQueue {
 	return &PeerRequestQueue {
-		new: make([]*RequestMessage, 0, max),
-		pending: make([]*RequestMessage, 0, max),
-		max : max,
+		new: make([]*RequestMessage, 0, cap),
+		pending: make([]*RequestMessage, 0, cap),
+		cap : cap,
 	}
 }
 
@@ -47,7 +47,7 @@ func (pq * PeerRequestQueue) Remove(index, begin, length uint32) bool {
 }
 
 func (pq * PeerRequestQueue) IsFull() bool {
-	return pq.Size() < pq.max
+	return pq.Size() < pq.cap
 }
 
 func (pq * PeerRequestQueue) Size() int {
@@ -55,7 +55,7 @@ func (pq * PeerRequestQueue) Size() int {
 }
 
 func (pq * PeerRequestQueue) Capacity() int {
-	return pq.max
+	return pq.cap
 }
 
 func (pq * PeerRequestQueue) AddRequest(r * RequestMessage) {
