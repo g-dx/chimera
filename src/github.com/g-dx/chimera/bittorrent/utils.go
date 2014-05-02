@@ -5,6 +5,10 @@ import (
 	"fmt"
 )
 
+func newError(format string, args...interface {}) error {
+	return errors.New(fmt.Sprintf(format, args))
+}
+
 func optBs(entries map[string] interface {}, key string) (string) {
 	v, ok := entries[key]
 	if !ok {
@@ -35,7 +39,7 @@ func bs(entries map[string] interface{}, key string) (string) {
 
 	v, ok := entries[key]
 	if !ok {
-		panic(errors.New(fmt.Sprintf("Mandatory bytestring (%v) not found.", key)))
+		panic(newError("Mandatory bytestring (%v) not found.", key))
 	}
 	return v.(string)
 }
@@ -44,7 +48,7 @@ func l(entries map[string] interface {}, key string) ([]interface {}) {
 
 	v, ok := entries[key]
 	if !ok {
-		panic(errors.New(fmt.Sprintf("Mandatory list (%v) not found.", key)))
+		panic(newError("Mandatory list (%v) not found.", key))
 	}
 	return v.([]interface {})
 }
@@ -53,7 +57,7 @@ func i(entries map[string] interface {}, key string) (int64) {
 
 	v, ok := entries[key]
 	if !ok {
-		panic(errors.New(fmt.Sprintf("Mandatory integer (%v) not found.", key)))
+		panic(newError("Mandatory integer (%v) not found.", key))
 	}
 	return v.(int64)
 }
@@ -62,7 +66,7 @@ func d(entries map[string] interface {}, key string) (map[string] interface {}) 
 
 	v, ok := entries[key]
 	if !ok {
-		panic(errors.New(fmt.Sprintf("Mandatory dictionary (%v) not found.", key)))
+		panic(newError("Mandatory dictionary (%v) not found.", key))
 	}
 	return v.(map[string] interface {})
 }

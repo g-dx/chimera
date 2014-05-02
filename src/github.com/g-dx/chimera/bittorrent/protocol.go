@@ -22,8 +22,8 @@ type PeerCoordinator struct {
 	done chan struct{}
 	dir string
 	logger *log.Logger
-	reader chan RequestMessage
-	writer chan BlockMessage
+	reader chan *RequestMessage
+	writer chan *BlockMessage
 }
 
 func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*PeerCoordinator, error) {
@@ -37,8 +37,8 @@ func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 	logger := log.New(f, "", log.Ldate | log.Ltime)
 
 	// Start fake disk reader
-	diskWriter := make(chan BlockMessage)
-	diskReader := make(chan RequestMessage)
+	diskWriter := make(chan *BlockMessage)
+	diskReader := make(chan *RequestMessage)
 	go mockDisk(diskReader, diskWriter, logger)
 
 
@@ -131,7 +131,7 @@ func (pc * PeerCoordinator) onTrackerResponse(r *TrackerResponse) {
 
 func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceMap) {
 
-	c, err := NewConnection(addr.GetIpAndPort())
+	conn, err := NewConnection(addr.GetIpAndPort())
 	if err != nil {
 		pc.logger.Printf("Can't connect to [%v]: %v\n", addr, err)
 		return
@@ -139,19 +139,35 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 
 	in := make(chan ProtocolMessage, 10)
 	out := make(chan ProtocolMessage, 10)
-	e := make(chan error)
+	e := make(chan error, 3) // error sources -> reader, writer, peer
 	outHandshake := Handshake(pc.metaInfo.InfoHash)
 
 	// Attempt to establish connection
-	id, err := c.Establish(in, out, e, outHandshake, pc.dir)
+	id, err := conn.Establish(in, out, e, outHandshake, pc.dir)
 	if err != nil {
 		pc.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
-		c.Close()
+		conn.Close()
 		return;
 	}
 
+	// NOTE: Pass this function to peer and when it closes itself or
+	//       close is called externally it calls back to cleanup coordinator
+	onPeerClose := func(err error) {
+
+		// 1. Log initial error which caused close (possibly nil)
+
+		// 2. Close connection
+		err = conn.Close();
+		if err != nil {
+			// Can't really do anything about it...
+		}
+
+		// 3. Remove from list of peers
+//		pc.peers.remove();
+	}
+
 	// Connected
-	p := NewPeer(*id, in, out, pc.metaInfo, pieceMap, pc.logger)
+	p := NewPeer(*id, in, out, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
 	pc.logger.Printf("New Peer: %v\n", p)
 	pc.addPeer <- p
 }

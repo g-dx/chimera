@@ -3,6 +3,7 @@ package bittorrent
 import (
 	"fmt"
 	"bytes"
+	"errors"
 )
 
 var bitMasks = [8]byte{ 1, 2, 4, 8, 16, 32, 64, 128 }
@@ -12,6 +13,8 @@ type BitSet struct {
 	size uint32
 	complete bool
 }
+
+var errSpareBitsSet = errors.New("Detected one or more spare bits set.")
 
 func NewBitSet(size uint32) *BitSet {
 
@@ -24,9 +27,20 @@ func NewBitSet(size uint32) *BitSet {
 	return &BitSet { make([]uint8, len), size, false }
 }
 
-func NewFromBytes(bits []byte, size uint32) *BitSet {
-	// TODO: Ensure high bits are not set...
-	return &BitSet { bits, size, false }
+func NewFromBytes(bits []byte, size uint32) (*BitSet, error) {
+
+	// Ensure spare bits are not set
+	if i := uint32(size % 8); i != 0 {
+		for ; i < 8; i++ {
+			if bits[len(bits)-1]|bitMasks[i] != 0 {
+				return nil, errSpareBitsSet
+			}
+		}
+	}
+
+	bs := &BitSet { bits, size, false }
+	bs.IsComplete() // Double check if we are complete
+	return bs, nil
 }
 
 func (bs BitSet) Have(i uint32) bool {
