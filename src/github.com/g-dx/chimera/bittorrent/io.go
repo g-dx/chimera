@@ -1,5 +1,45 @@
 package bittorrent
 
+// IO Utils - ...
+
+type OutgoingBuffer struct {
+	buffer []ProtocolMessage
+	c chan<- ProtocolMessage
+}
+
+func NewOutgoingBuffer(c chan<- ProtocolMessage, cap int) *OutgoingBuffer {
+	return &OutgoingBuffer {
+		buffer : make([]ProtocolMessage, 0, cap),
+		c : c,
+	}
+}
+
+func (ob * OutgoingBuffer) Add(msg ProtocolMessage) {
+	ob.buffer = append(ob.buffer, msg)
+}
+
+func (ob * OutgoingBuffer) Pump(max int) int {
+	n := 0
+	for i := 0 ; i < max ; i++ {
+		out := MaybeEnable(ob.c, func() bool { return len(ob.buffer) > 0 })
+		select {
+		case out <- ob.buffer[0]:
+			ob.buffer = ob.buffer[1:]
+			n++
+		default: break
+		}
+	}
+	return n
+}
+
+func MaybeEnable(ch chan interface {}, f func() bool) chan interface {} {
+	var channel chan interface {} // Nil
+	if(f()) {
+		channel = ch
+	}
+	return channel
+}
+
 type PeerRequestQueue struct {
 	new      []*RequestMessage
 	pending  []*RequestMessage
@@ -66,36 +106,7 @@ func (pq * PeerRequestQueue) AddBlock(b * BlockMessage) {
 	// TODO: If not in pending queue - discard...
 }
 
-func (pq * PeerRequestQueue) Pump(reqs, blocks chan<- ProtocolMessage,) {
+func (pq * PeerRequestQueue) Pump() {
 
-	// REMOTE PEER => in (disk), out (outgoing buffer)
-	// LOCAL PEER  => in (outgoing buffer), out(disk)
-
-	// Pump requests to "in"
-
-	// Pump blocks to "out"
+	// TODO: Use incoming and outgoing buffers as destinations
 }
-
-
-//func (p * Peer) MaybeReadBlock(diskReader chan RequestMessage) {
-//	if len(p.remotePendingReads) > 0 {
-//		select {
-//		case diskReader <- *p.remotePendingReads[0]:
-//			p.remoteSubmittedReads = append(p.remoteSubmittedReads, p.remotePendingReads[0])
-//			p.remotePendingReads = p.remotePendingReads[1:]
-//		default:
-//			// Non-blocking read...
-//		}
-//	}
-//}
-//
-//func (p * Peer) MaybeWriteBlock(diskWriter chan BlockMessage) {
-//	if len(p.localPendingWrites) > 0 {
-//		select {
-//		case diskWriter <- *p.localPendingWrites[0]:
-//			p.localPendingWrites = p.localPendingWrites[1:]
-//		default:
-//			// Non-blocking write...
-//		}
-//	}
-//}
