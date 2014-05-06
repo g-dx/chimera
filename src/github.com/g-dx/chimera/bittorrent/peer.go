@@ -9,53 +9,25 @@ const (
 	maxOutgoingQueue = 25
 	maxRemoteRequestQueue = 10
 	maxOutstandingLocalRequests = 10
-
-	// Max number of messages to write during "Process"
-	maxMessageWrites = 5
-
-	// Max number of disk reads during "Process"
-	maxDiskReads = 5
 )
 
-type ProtocolHandler interface {
-	Choke()
-	Unchoke()
-	Interested()
-	Uninterested()
-	Have(index uint32)
-	Bitfield(bits []byte)
-	Cancel(index, begin, length uint32)
-	Request(index, begin, length uint32)
-	Block(index, begin uint32, block []byte)
-}
-
-type Statistics struct {
-	totalBytesDownloaded uint64
-	bytesDownloadedPerUpdate uint
-	bytesDownloaded uint
-}
-
-func (s * Statistics) Update() {
-
-	// Update & reset
-	s.bytesDownloadedPerUpdate = s.bytesDownloaded
-	s.bytesDownloaded = 0
-}
-
-func (s * Statistics) Downloaded(n uint) {
-	s.bytesDownloaded += n
-}
+// ----------------------------------------------------------------------------------
+// Peer
+// ----------------------------------------------------------------------------------
 
 type Peer struct {
 
-	// Outgoing protocol & disk buffers
-	out, disk * OutgoingBuffer
+	// Message buffer & message sinks
+	inBuf, outBuf * RingBuffer
+	diskSink * DiskSink
+	bufferSink * BufferSink
 
 	// Request queues
 	remoteQ, localQ * PeerRequestQueue
 
 	// Incoming, outgoing & connection error channels
 	in  <-chan ProtocolMessage
+	out chan<- ProtocolMessage
 	err <-chan error
 
 	// State of peer
@@ -77,25 +49,32 @@ type Peer struct {
 }
 
 func NewPeer(id PeerIdentity,
-		     out, disk chan<- ProtocolMessage,
 			 in <-chan ProtocolMessage,
+		     out chan<- ProtocolMessage,
+//			 disk chan<- DiskMessage,
 			 mi * MetaInfo,
 	         pieceMap *PieceMap,
 			 e <-chan error,
 			 logger * log.Logger,
 			 onCloseFn func(error)) *Peer {
+
+	outBuf := NewRingBuffer(maxOutgoingQueue)
+
 	return &Peer {
-		out     : NewOutgoingBuffer(out, maxOutstandingLocalRequests),
-		disk    : NewOutgoingBuffer(disk, maxOutstandingLocalRequests),
+		inBuf  : NewRingBuffer(maxOutgoingQueue),
+		outBuf : outBuf,
+		diskSink : NewDiskSink(id),
+		bufferSink : NewBufferSink(outBuf),
 		remoteQ : NewPeerRequestQueue(maxRemoteRequestQueue),
 		localQ  : NewPeerRequestQueue(maxOutstandingLocalRequests),
-		in : in,
+		in      : in,
+		out     : out,
 		pieceMap : pieceMap,
 		state : NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
 		id : id,
 		logger : logger,
 		err : e,
-		statistics : new(Statistics),
+		statistics : &Statistics{},
 		onCloseFn : onCloseFn,
 	}
 }
@@ -115,14 +94,14 @@ func NewPeerState(bits *BitSet) PeerState {
 	}
 }
 
-func (p * Peer) handleMessage(pm ProtocolMessage) {
+func (p * Peer) HandleMessage(pm ProtocolMessage) {
 	p.logger.Printf("%v, Handling Msg: %v\n", p.id, pm)
 	switch msg := pm.(type) {
 	case *ChokeMessage: p.Choke()
 	case *UnchokeMessage: p.Unchoke()
 	case *InterestedMessage: p.Interested()
 	case *UninterestedMessage: p.Uninterested()
-	case *BitfieldMessage: p.state.bitfield(msg.Bits())
+	case *BitfieldMessage: p.Bitfield(msg.Bits())
 	case *HaveMessage: p.Have(msg.Index())
 	case *CancelMessage: p.Cancel(msg.Index(), msg.Begin(), msg.Length())
 	case *RequestMessage: p.Request(msg.Index(), msg.Begin(), msg.Length())
@@ -133,7 +112,7 @@ func (p * Peer) handleMessage(pm ProtocolMessage) {
 }
 
 func (p * Peer) Choke() {
-	p.pieceMap.ReturnBlocks(p.localQ.Clear())
+	p.pieceMap.ReturnBlocks(p.localQ.ClearNew())
 	p.state.localChoke = true
 }
 
@@ -161,7 +140,7 @@ func (p * Peer) Have(index uint32) {
 		p.pieceMap.Inc(index)
 
 		if p.isNowInteresting(index) {
-			p.out.Add(Interested)
+			p.outBuffer.Add(Interested)
 		}
 	}
 }
@@ -209,7 +188,7 @@ func (p * Peer) Bitfield(bits []byte) {
 	}
 }
 
-	func (p * Peer) ProcessMessages() int {
+func (p * Peer) ProcessMessages() int {
 
 	// Number of operations we performed
 	ops := 0
@@ -222,23 +201,21 @@ func (p * Peer) Bitfield(bits []byte) {
 	default:
 	}
 
-	// Enable message read if we have space
-	in := MaybeEnable(p.in, func() bool { return !p.remoteQ.IsFull() && p.out.Size() < maxOutgoingQueue })
-	select {
-	case msg := <- in:
-		p.handleMessage(msg)
+	// Attempt to fill message buffer & then process them
+	p.inBuf.Fill(p.in)
+	for !p.inBuf.IsEmpty() {
+		p.HandleMessage(p.inBuf.Next())
 		ops++
-	default:
 	}
 
 	// Drain requests & blocks to appropriate destinations
-	p.remoteQ.Drain(p.disk, p.out)
-	p.localQ.Drain(p.out, p.disk)
+	connectionSink := NewBufferSink(p.outBuf)
+	p.remoteQ.Drain(p.diskSink, connectionSink)
+	p.localQ.Drain(connectionSink, p.diskSink)
 
-	// Pump disk & out queue
-	ops += p.out.Pump(maxMessageWrites)
-	ops += p.disk.Pump(maxDiskReads)
-
+	// Flush all messages to outgoing channel
+	ops += p.outBuf.Flush(p.out)
+	ops += p.diskSink.Flush(p.disk)
 	return ops
 }
 func (p Peer) Statistics() *Statistics {
@@ -255,7 +232,7 @@ func (p * Peer) Close(err error) {
 	p.pieceMap.DecAll(p.state.bitfield)
 
 	// Return outstanding blocks
-	p.pieceMap.ReturnBlocks(p.localQ.Clear())
+	p.pieceMap.ReturnBlocks(p.localQ.ClearAll())
 
 	// Invoke on close
 	p.onCloseFn(err)
@@ -270,6 +247,23 @@ func (p * Peer) CanDownload() bool {
 	return !p.state.localChoke && p.state.localInterest && p.BlocksRequired() > 0
 }
 
-func (p * Peer) String() string {
-	return fmt.Sprintf("")
+// ----------------------------------------------------------------------------------
+// PeerStatistics
+// ----------------------------------------------------------------------------------
+
+type Statistics struct {
+	totalBytesDownloaded uint64
+	bytesDownloadedPerUpdate uint
+	bytesDownloaded uint
+}
+
+func (s * Statistics) Update() {
+
+	// Update & reset
+	s.bytesDownloadedPerUpdate = s.bytesDownloaded
+	s.bytesDownloaded = 0
+}
+
+func (s * Statistics) Downloaded(n uint) {
+	s.bytesDownloaded += n
 }
