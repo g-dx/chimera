@@ -49,7 +49,7 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap) {
 			// Find 10 rarest available pieces with blocks still required
 			pieces := make([]*Piece, 0, 10)
 			for _, piece := range pieceMap.pieces {
-				if piece.state == BLOCKS_NEEDED && peer.bitfield.Have(piece.index) {
+				if piece.state == BLOCKS_NEEDED && peer.state.bitfield.Have(piece.index) {
 					pieces = append(pieces, piece)
 					if len(pieces) == 10 {
 						break

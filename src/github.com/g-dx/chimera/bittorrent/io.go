@@ -2,91 +2,149 @@ package bittorrent
 
 // IO Utils - ...
 
-type OutgoingBuffer struct {
-	buffer []ProtocolMessage
-	c chan<- ProtocolMessage
+type RequestMessageSink interface {
+	CanWrite() bool
+	WriteRequest(r *RequestMessage)
 }
 
-func NewOutgoingBuffer(c chan<- ProtocolMessage, cap int) *OutgoingBuffer {
-	return &OutgoingBuffer {
-		buffer : make([]ProtocolMessage, 0, cap),
-		c : c,
+type BlockMessageSink interface {
+	CanWrite() bool
+	WriteBlock(b *BlockMessage)
+}
+
+// ----------------------------------------------------------------------------------
+// BufferSink - writes messages to a RingBuffer
+// ----------------------------------------------------------------------------------
+
+type BufferSink struct {
+	buffer *RingBuffer
+}
+
+func NewBufferSink(buffer *RingBuffer) *BufferSink {
+	return &BufferSink {
+		buffer : buffer,
 	}
 }
 
-func (ob * OutgoingBuffer) Size() int {
-	return len(ob.buffer)
+func (bs BufferSink) CanWrite() bool {
+	return !bs.buffer.IsFull()
 }
 
-func (ob * OutgoingBuffer) Add(msg ProtocolMessage) {
-	ob.buffer = append(ob.buffer, msg)
+func (bs BufferSink) WriteBlock(m *BlockMessage) {
+	bs.buffer.Add(m)
 }
 
-func (ob * OutgoingBuffer) Pump(max int) int {
-	n := 0
-	for i := 0 ; len(ob.buffer) > 0 && i < max ; i++ {
+func (bs BufferSink) WriteRequest(m *RequestMessage) {
+	bs.buffer.Add(m)
+}
+
+
+// ----------------------------------------------------------------------------------
+// DiskSink - writes messages to a channel of DiskMessages
+// ----------------------------------------------------------------------------------
+
+type DiskSink struct {
+	id PeerIdentity
+	buffer chan DiskMessage
+	cap, size int
+}
+
+func NewDiskSink(id PeerIdentity) *DiskSink {
+	return &DiskSink{
+		id : id,
+		buffer: make(chan DiskMessage, 10),
+	}
+}
+
+func (ds DiskSink) CanWrite() bool {
+	return ds.size < ds.cap
+}
+
+func (ds * DiskSink) WriteBlock(msg *BlockMessage) {
+
+	//	ds.buffer = append(ds.buffer, dm)
+	ds.size++
+}
+
+func (ds * DiskSink) WriteRequest(msg *RequestMessage) {
+	ds.size++
+}
+
+func (ds DiskSink) Flush(disk chan<- DiskMessage) {
+	for ds.size > 0 {
+		msg := <- ds.buffer
 		select {
-		case ob.c <- ob.buffer[0]:
-			ob.buffer = ob.buffer[1:]
-			n++
-		default: break // Non-blocking...
+		case disk <- msg: ds.size--
+		default: break // Non-blocking
 		}
 	}
-	return n
 }
 
-func MaybeEnable(ch chan interface {}, f func() bool) chan interface {} {
-	var channel chan interface {} // Nil
-	if(f()) {
-		channel = ch
-	}
-	return channel
-}
+// ----------------------------------------------------------------------------------
+// PeerRequestQueue - manages requests for blocks
+// ----------------------------------------------------------------------------------
 
 type PeerRequestQueue struct {
 	new      []*RequestMessage
 	pending  []*RequestMessage
 	received []*BlockMessage
-	cap int
+	cap      int
 }
 
 func NewPeerRequestQueue(cap int) *PeerRequestQueue {
 	return &PeerRequestQueue {
-		new: make([]*RequestMessage, 0, cap),
-		pending: make([]*RequestMessage, 0, cap),
-		cap : cap,
+		new     : make([]*RequestMessage, 0, cap),
+		pending : make([]*RequestMessage, 0, cap),
+		cap     : cap,
 	}
 }
 
-func (pq * PeerRequestQueue) Clear() []*RequestMessage {
+func (pq * PeerRequestQueue) ClearNew() []*RequestMessage {
 
-	// Collect all outstanding requests
+	// Collect all outstanding new requests
 	var reqs []*RequestMessage
 	reqs = append(reqs, pq.new...)
-	reqs = append(reqs, pq.pending...)
 
 	// NOTE: This does not make the elements of the slice eligible for GC!
 	pq.new = pq.new[:0]
+	return reqs
+}
+
+func (pq * PeerRequestQueue) ClearAll() []*RequestMessage {
+
+	// Collect all outstanding requests
+	var reqs []*RequestMessage
+	reqs = append(reqs, pq.ClearNew()...)
+	reqs = append(reqs, pq.pending...)
+
+	// NOTE: This does not make the elements of the slice eligible for GC!
 	pq.pending = pq.pending[:0]
 	return reqs
 }
 
 func (pq * PeerRequestQueue) Remove(index, begin, length uint32) bool {
-	for i, req := range pq.new {
-		if req.Index() == index && req.Begin() == begin && req.Length() == length {
-			pq.new = append(pq.new[:i], pq.new[i+1:]...)
-			return true
-		}
+
+	ok, reqs := removeRequest(index, begin, length, pq.new)
+	if ok {
+		pq.new = reqs
+		return ok
 	}
 
-	for i, req := range pq.pending {
-		if req.Index() == index && req.Begin() == begin && req.Length() == length {
-			pq.pending = append(pq.pending[:i], pq.pending[i+1:]...)
-			return true
-		}
+	ok, reqs = removeRequest(index, begin, length, pq.pending)
+	if ok {
+		pq.pending = reqs
+		return ok
 	}
-
 	return false
+}
+
+func removeRequest(index, begin, length uint32, reqs []*RequestMessage) (bool, []*RequestMessage) {
+	for i, req := range reqs {
+		if req.Index() == index && req.Begin() == begin && req.Length() == length {
+			return true, append(reqs[:i], reqs[i+1:]...)
+		}
+	}
+	return false, nil
 }
 
 func (pq * PeerRequestQueue) IsFull() bool {
@@ -109,20 +167,25 @@ func (pq * PeerRequestQueue) AddBlock(b * BlockMessage) {
 	// TODO: If not in pending queue - discard...
 }
 
-func (pq * PeerRequestQueue) Drain(requests, blocks * OutgoingBuffer) {
+func (pq * PeerRequestQueue) Drain(rSink RequestMessageSink, bSink BlockMessageSink) {
 
-	// Drain requests out
-	// TODO: Should we drain the entire queue?
-	if len(pq.new) > 0 {
-		requests.Add(pq.new[0])
-		pq.pending = append(pq.pending, pq.new[0])
-		pq.new = pq.new[1:]
-	}
+	for {
+		ok := false
+		if len(pq.new) > 0 && rSink.CanWrite() {
+			rSink.WriteRequest(pq.new[0])
+			pq.pending = append(pq.pending, pq.new[0])
+			pq.new = pq.new[1:]
+			ok = true
+		}
 
-	// Drain blocks out
-	// TODO: Should we drain the entire queue?
-	if len(pq.received) > 0 {
-		blocks.Add(pq.received[0])
-		pq.received = pq.received[1:]
+		if len(pq.received) > 0 && bSink.CanWrite() {
+			bSink.WriteBlock(pq.received[0])
+			pq.received = pq.received[1:]
+			ok = true
+		}
+
+		if !ok {
+			break
+		}
 	}
 }
