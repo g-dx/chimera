@@ -3,13 +3,36 @@ package bittorrent
 import (
 	"fmt"
 	"log"
+	"time"
 )
 
 const (
 	maxOutgoingQueue = 25
 	maxRemoteRequestQueue = 10
 	maxOutstandingLocalRequests = 10
+
+	ThirtySeconds = 30 * time.Second
 )
+
+
+// ----------------------------------------------------------------------------------
+// Peer State - key protocol state
+// ----------------------------------------------------------------------------------
+
+type PeerState struct {
+	remoteChoke, localChoke, remoteInterest, localInterest bool
+	bitfield *BitSet
+}
+
+func NewPeerState(bits *BitSet) PeerState {
+	return PeerState {
+		remoteChoke : true,
+		localChoke : true,
+		remoteInterest : false,
+		localInterest : false,
+		bitfield : bits,
+	}
+}
 
 // ----------------------------------------------------------------------------------
 // Peer
@@ -18,16 +41,14 @@ const (
 type Peer struct {
 
 	// Message buffer & message sinks
-	inBuf, outBuf * RingBuffer
-	diskSink * DiskSink
-	bufferSink * BufferSink
+	inBuf * RingBuffer
 
-	// Request queues
+	// Request queues & sinks
 	remoteQ, localQ * PeerRequestQueue
+	remoteSink, localSink * MessageSink
 
-	// Incoming, outgoing & connection error channels
+	// Incoming & connection error channels
 	in  <-chan ProtocolMessage
-	out chan<- ProtocolMessage
 	err <-chan error
 
 	// State of peer
@@ -51,47 +72,62 @@ type Peer struct {
 func NewPeer(id PeerIdentity,
 			 in <-chan ProtocolMessage,
 		     out chan<- ProtocolMessage,
-//			 disk chan<- DiskMessage,
+			 disk chan<- DiskMessage,
 			 mi * MetaInfo,
-	         pieceMap *PieceMap,
+	         pieceMap * PieceMap,
 			 e <-chan error,
 			 logger * log.Logger,
 			 onCloseFn func(error)) *Peer {
 
-	outBuf := NewRingBuffer(maxOutgoingQueue)
-
 	return &Peer {
-		inBuf  : NewRingBuffer(maxOutgoingQueue),
-		outBuf : outBuf,
-		diskSink : NewDiskSink(id),
-		bufferSink : NewBufferSink(outBuf),
-		remoteQ : NewPeerRequestQueue(maxRemoteRequestQueue),
-		localQ  : NewPeerRequestQueue(maxOutstandingLocalRequests),
+		inBuf      : NewRingBuffer(maxOutgoingQueue),
+
+		remoteQ    : NewPeerRequestQueue(maxRemoteRequestQueue),
+		remoteSink : NewRemoteMessageSink(id, out, disk),
+		localQ     : NewPeerRequestQueue(maxOutstandingLocalRequests),
+		localSink  : NewLocalMessageSink(id, out, disk),
+
 		in      : in,
-		out     : out,
-		pieceMap : pieceMap,
-		state : NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
-		id : id,
+
+		id         : id,
+		pieceMap   : pieceMap,
+		state      : NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
+
 		logger : logger,
 		err : e,
+
 		statistics : &Statistics{},
 		onCloseFn : onCloseFn,
 	}
 }
 
-type PeerState struct {
-	remoteChoke, localChoke, remoteInterest, localInterest bool
-	bitfield *BitSet
-}
+func (p * Peer) ProcessMessages() int {
 
-func NewPeerState(bits *BitSet) PeerState {
-	return PeerState {
-		remoteChoke : true,
-		localChoke : true,
-		remoteInterest : false,
-		localInterest : false,
-		bitfield : bits,
+	// Number of operations we performed
+	n := 0
+
+	// Check for errors
+	select {
+	case err := <- p.err:
+		p.Close(err)
+		return 0
+	default:
 	}
+
+	// Return expired requests to map
+	p.pieceMap.ReturnBlocks(p.localQ.ClearExpired(ThirtySeconds))
+
+	// Attempt to fill message buffer & then process them
+	p.inBuf.Fill(p.in)
+	for !p.inBuf.IsEmpty() {
+		p.HandleMessage(p.inBuf.Next())
+		n++
+	}
+
+	// Drain local & remote traffic to appropriate destinations
+	n += p.localQ.Drain(p.localSink)
+	n += p.remoteQ.Drain(p.remoteSink)
+	return n
 }
 
 func (p * Peer) HandleMessage(pm ProtocolMessage) {
@@ -140,7 +176,7 @@ func (p * Peer) Have(index uint32) {
 		p.pieceMap.Inc(index)
 
 		if p.isNowInteresting(index) {
-			p.outBuffer.Add(Interested)
+			p.localQ.Add(Interested)
 		}
 	}
 }
@@ -155,7 +191,7 @@ func (p * Peer) Request(index, begin, length uint32) {
 	}
 
 	if !p.state.remoteChoke {
-		p.remoteQ.AddRequest(Request(index, begin, length))
+		p.remoteQ.Add(Request(index, begin, length))
 	}
 }
 
@@ -164,7 +200,7 @@ func (p * Peer) Block(index, begin uint32, block []byte) {
 		p.Close(newError("Invalid block received: %v, %v, %v", index, begin, block))
 	}
 
-	p.localQ.AddBlock(Block(index, begin, block))
+	p.localQ.Add(Block(index, begin, block))
 	p.Statistics().Downloaded(uint(len(block)))
 }
 
@@ -183,41 +219,12 @@ func (p * Peer) Bitfield(bits []byte) {
 	for i := uint32(0); i < p.state.bitfield.Size(); i++ {
 		if p.pieceMap.Piece(i).BlocksNeeded() {
 			p.state.localInterest = true
+			p.localQ.Add(Interested)
 			break
 		}
 	}
 }
 
-func (p * Peer) ProcessMessages() int {
-
-	// Number of operations we performed
-	ops := 0
-
-	// Check for errors
-	select {
-	case err := <- p.err:
-		p.Close(err)
-		return 0
-	default:
-	}
-
-	// Attempt to fill message buffer & then process them
-	p.inBuf.Fill(p.in)
-	for !p.inBuf.IsEmpty() {
-		p.HandleMessage(p.inBuf.Next())
-		ops++
-	}
-
-	// Drain requests & blocks to appropriate destinations
-	connectionSink := NewBufferSink(p.outBuf)
-	p.remoteQ.Drain(p.diskSink, connectionSink)
-	p.localQ.Drain(connectionSink, p.diskSink)
-
-	// Flush all messages to outgoing channel
-	ops += p.outBuf.Flush(p.out)
-	ops += p.diskSink.Flush(p.disk)
-	return ops
-}
 func (p Peer) Statistics() *Statistics {
 	return p.statistics
 }
@@ -255,6 +262,10 @@ type Statistics struct {
 	totalBytesDownloaded uint64
 	bytesDownloadedPerUpdate uint
 	bytesDownloaded uint
+
+	totalBytesWritten uint64
+	bytesWrittenPerUpdate uint
+	bytesWritten uint
 }
 
 func (s * Statistics) Update() {
@@ -262,8 +273,14 @@ func (s * Statistics) Update() {
 	// Update & reset
 	s.bytesDownloadedPerUpdate = s.bytesDownloaded
 	s.bytesDownloaded = 0
+	s.bytesWrittenPerUpdate = s.bytesWritten
+	s.bytesWritten = 0
 }
 
 func (s * Statistics) Downloaded(n uint) {
 	s.bytesDownloaded += n
+}
+
+func (s * Statistics) Written(n uint) {
+	s.bytesWritten += n
 }

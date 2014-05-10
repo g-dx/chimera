@@ -6,23 +6,41 @@ type DiskMessage interface {
 	Id() PeerIdentity
 }
 
-type WriteMessage struct {
+type DiskWriteMessage struct {
 	id PeerIdentity
 	index, begin uint32
-	block *[]byte
+	block []byte
 }
 
-func (dw WriteMessage) Id() PeerIdentity {
+func (dw DiskWriteMessage) Id() PeerIdentity {
 	return dw.id
 }
 
-type ReadMessage struct {
+func DiskWrite(b *BlockMessage, id PeerIdentity) *DiskWriteMessage {
+	return &DiskWriteMessage {
+		id : id,
+		index : b.Index(),
+		begin : b.Begin(),
+		block : b.Block(),
+	}
+}
+
+type DiskReadMessage struct {
 	id PeerIdentity
 	index, begin, length uint32
 }
 
-func (dm ReadMessage) Id() PeerIdentity {
+func (dm DiskReadMessage) Id() PeerIdentity {
 	return dm.id
+}
+
+func DiskRead(r *RequestMessage, id PeerIdentity) *DiskReadMessage {
+	return &DiskReadMessage {
+		id : id,
+		index : r.Index(),
+		begin : r.Begin(),
+		length : r.Length(),
+	}
 }
 
 func mockDisk(reader <-chan DiskMessage, logger *log.Logger) {

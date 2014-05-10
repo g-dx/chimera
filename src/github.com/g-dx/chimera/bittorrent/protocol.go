@@ -136,7 +136,7 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 
 	in := make(<-chan ProtocolMessage, 10)
 	out := make(chan<- ProtocolMessage, 10)
-
+	disk := make(chan<- DiskMessage, 10)
 	e := make(chan error, 3) // error sources -> reader, writer, peer
 	outHandshake := Handshake(pc.metaInfo.InfoHash)
 
@@ -165,7 +165,7 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 	}
 
 	// Connected
-	p := NewPeer(*id, in, out, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
+	p := NewPeer(*id, in, out, disk, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
 	pc.logger.Printf("New Peer: %v\n", p)
 	pc.addPeer <- p
 }
