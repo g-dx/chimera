@@ -21,6 +21,8 @@ var (
 	KEEP_ALIVE_PERIOD = 1 * time.Minute
 	DIAL_TIMEOUT = 10 * time.Second
 	HANDSHAKE_TIMEOUT = 5 * time.Second
+	ONE_HUNDRED_MILLIS = 100 * time.Millisecond
+	FIVE_HUNDRED_MILLIS = 5 * ONE_HUNDRED_MILLIS
 
 	errHashesNotEquals = errors.New("Info hashes not equal")
 	errHandshakeNotReceived =
@@ -70,7 +72,6 @@ func NewConnection(addr string) (*PeerConnection, error) {
 			close : c,
 			c : nil,
 			conn : conn,
-			pending : make([]ProtocolMessage, 0, MAX_OUTGOING_BUFFER),
 			curr : make([]byte, 0),
 		},
 	}
@@ -123,14 +124,9 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (pi 
 	}()
 
 	// TODO: we should possibly be first reading if this is an incoming connection
-	// Attempt to write outgoing handshake
-	pc.out.add(outHandshake)
-	pc.out.writeOrSleepFor(HANDSHAKE_TIMEOUT)
-	if len(pc.out.curr) != 0 {
-		return nil, errHandshakeNotReceived
-	}
-
-	// Attempt to read incoming handshake
+	// Write outgoing handshake & attempt to read incoming handshake
+	pc.out.append(outHandshake)
+	pc.out.writeOrReceiveFor(HANDSHAKE_TIMEOUT)
 	pc.in.readOrSleepFor(HANDSHAKE_TIMEOUT)
 	if len(pc.in.pending) == 0 {
 		return nil, errHandshakeNotReceived
@@ -257,7 +253,6 @@ type OutgoingPeerConnection struct {
 	close <-chan struct{}
 	c <-chan ProtocolMessage
 	conn net.Conn
-	pending []ProtocolMessage
 	curr []byte
 	logger *log.Logger
 }
@@ -269,10 +264,10 @@ func (oc * OutgoingPeerConnection) loop(err chan<- error) {
 		c := oc.maybeEnableReceive()
 		select {
 		case <- oc.close: break
-		case <- keepAlive: oc.add(KeepAliveMessage)
-		case msg := <- c: oc.add(msg)
+		case <- keepAlive: oc.append(KeepAliveMessage)
+		case msg := <- c: oc.append(msg)
 		default:
-			if n := oc.writeOrSleepFor(ONE_SECOND); n > 0 {
+			if n := oc.writeOrReceiveFor(FIVE_HUNDRED_MILLIS); n > 0 {
 				keepAlive = time.After(KEEP_ALIVE_PERIOD)
 			}
 		}
@@ -282,43 +277,38 @@ func (oc * OutgoingPeerConnection) loop(err chan<- error) {
 
 func (oc * OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
 	var c <-chan ProtocolMessage
-	if len(oc.pending) < MAX_OUTGOING_BUFFER {
+	if len(oc.curr) == 0 {
 		c = oc.c
 	}
 	return c
 }
 
-func (oc * OutgoingPeerConnection) add(msg ProtocolMessage) {
+func (oc * OutgoingPeerConnection) append(msg ProtocolMessage) {
 	oc.logger.Print(msg)
-	oc.pending = append(oc.pending, msg)
+	oc.curr = append(oc.curr, Marshal(msg)...)
 }
 
-func (oc * OutgoingPeerConnection) 	writeOrSleepFor(d time.Duration) (bytes int) {
+func (oc * OutgoingPeerConnection) writeOrReceiveFor(d time.Duration) (bytes int) {
 
-	if !oc.hasDataToWrite() {
-		time.Sleep(d)
-		return 0
-	}
+	if len(oc.curr) == 0 {
 
-	// Set deadline and write until we timeout or have nothing to write
-	oc.conn.SetWriteDeadline(time.Now().Add(d))
-	timeout := false
-	for !timeout && oc.hasDataToWrite() {
-		n := 0
-		if len(oc.curr) > 0 {
-			oc.curr, n, timeout = write(oc.conn, oc.curr)
-		} else if len(oc.pending) > 0 {
-			oc.curr = Marshal(oc.pending[0])
-			oc.pending = oc.pending[1:]
-			oc.curr, n, timeout = write(oc.conn, oc.curr)
+		// Receive until timeout
+		select {
+		case msg := <- oc.c: oc.curr = Marshal(msg)
+		case <- time.After(d):
 		}
-		bytes += n
+	} else {
+
+		// Set deadline and write until timeout
+		oc.conn.SetWriteDeadline(time.Now().Add(ONE_HUNDRED_MILLIS))
+		timeout := false
+		n := 0
+		for !timeout && len(oc.curr) > 0 {
+			oc.curr, n, timeout = write(oc.conn, oc.curr)
+			bytes += n
+		}
 	}
 	return bytes
-}
-
-func (oc * OutgoingPeerConnection) hasDataToWrite() bool {
-	return len(oc.curr) > 0 || len(oc.pending) > 0
 }
 
 func onLoopExit(c chan<- error) {
