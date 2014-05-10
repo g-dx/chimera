@@ -72,7 +72,7 @@ func TakeBlocks(pieces []*Piece, numRequired uint, p *Peer) {
 		n -= uint(len(reqs))
 		for _, req := range reqs {
 			fmt.Printf("Picker: %v, Peer: %v\n", req, p.id)
-			p.localQ.AddRequest(req)
+			p.localQ.Add(req)
 		}
 	}
 }
