@@ -23,6 +23,7 @@ type PeerCoordinator struct {
 	dir string
 	logger *log.Logger
 	diskR chan DiskMessage
+	diskResult <-chan DiskMessageResult
 }
 
 func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*PeerCoordinator, error) {
@@ -168,4 +169,22 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 	p := NewPeer(*id, in, out, disk, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
 	pc.logger.Printf("New Peer: %v\n", p)
 	pc.addPeer <- p
+}
+
+func (pc * PeerCoordinator) onDiskMessageResult(dmr DiskMessageResult) {
+	p := pc.FindPeer(dmr.Id())
+	switch msg := dmr.(type) {
+	case *DiskWriteResult:
+		if p != nil {
+			p.BlockWritten(msg.index, msg.begin)
+		}
+	case *DiskReadResult:
+		if p != nil {
+			p.remoteQ.Add(msg.b)
+		}
+	}
+}
+
+func (pc * PeerCoordinator) FindPeer(id PeerIdentity) *Peer {
+	return nil
 }

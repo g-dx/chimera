@@ -1,5 +1,7 @@
 package bittorrent
 
+import "hash"
+
 const (
 	_16KB = uint32(16 * 1024)
 	_128KB = uint32(128 * 1024)
@@ -79,8 +81,9 @@ func (pm * PieceMap) Piece(i uint32) *Piece {
 func (p * PieceMap) ReturnBlocks(reqs []*RequestMessage) {
 	for _, req := range reqs {
 		// Reset block state to needed and ensure overall piece state is blocks needed
-		p.pieces[req.Index()].blocks[req.Begin()%_16KB] = NEEDED
-		p.pieces[req.Index()].state = BLOCKS_NEEDED
+		piece := p.pieces[req.Index()]
+		piece.blocks[req.Begin()%_16KB] = NEEDED
+		piece.state = BLOCKS_NEEDED
 	}
 }
 
@@ -104,6 +107,7 @@ type Piece struct {
 	lastBlockLen uint32
 	availability uint32
 	state int
+	sha1 hash.Hash
 }
 
 func NewPiece(i, len uint32) *Piece {
@@ -158,6 +162,29 @@ func (p * Piece) TakeBlocks(n uint) []*RequestMessage {
 	// Set overall state & return
 	p.state = state
 	return blocks
+}
+
+func (p * Piece) BlockDone(begin uint32) {
+
+	// Set state
+	p.blocks[begin/_16KB] = DONE
+
+	// Check overall piece
+	isComplete := true
+	for _, block := range p.blocks {
+		if block != DONE {
+			isComplete = false
+			break
+		}
+	}
+
+	if isComplete {
+		p.state = COMPLETE
+	}
+}
+
+func (p * Piece) IsComplete() bool {
+	return p.state == COMPLETE
 }
 
 func (p Piece) BlockLen(i uint32) uint32 {
