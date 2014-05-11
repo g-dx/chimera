@@ -7,10 +7,8 @@ import (
 )
 
 const (
-	maxOutgoingQueue = 25
-	maxRemoteRequestQueue = 10
-	maxOutstandingLocalRequests = 10
-
+	ReceiveBufferSize = 25
+	RequestQueueSize = 25
 	ThirtySeconds = 30 * time.Second
 )
 
@@ -44,7 +42,7 @@ type Peer struct {
 	inBuf * RingBuffer
 
 	// Request queues & sinks
-	remoteQ, localQ * PeerRequestQueue
+	remoteQ, localQ * MessageQueue
 	remoteSink, localSink * MessageSink
 
 	// Incoming & connection error channels
@@ -57,7 +55,7 @@ type Peer struct {
 	// Overall torrent piece map
 	pieceMap *PieceMap
 
-	//
+	// ID
 	id PeerIdentity
 
 	// Peer statistics concerning upload, download, etc...
@@ -80,11 +78,11 @@ func NewPeer(id PeerIdentity,
 			 onCloseFn func(error)) *Peer {
 
 	return &Peer {
-		inBuf      : NewRingBuffer(maxOutgoingQueue),
+		inBuf      : NewRingBuffer(ReceiveBufferSize),
 
-		remoteQ    : NewPeerRequestQueue(maxRemoteRequestQueue),
+		remoteQ    : NewMessageQueue(RequestQueueSize),
 		remoteSink : NewRemoteMessageSink(id, out, disk),
-		localQ     : NewPeerRequestQueue(maxOutstandingLocalRequests),
+		localQ     : NewMessageQueue(RequestQueueSize),
 		localSink  : NewLocalMessageSink(id, out, disk),
 
 		in      : in,
@@ -117,16 +115,29 @@ func (p * Peer) ProcessMessages() int {
 	// Return expired requests to map
 	p.pieceMap.ReturnBlocks(p.localQ.ClearExpired(ThirtySeconds))
 
-	// Attempt to fill message buffer & then process them
-	p.inBuf.Fill(p.in)
-	for !p.inBuf.IsEmpty() {
-		p.HandleMessage(p.inBuf.Next())
-		n++
+	// If we have space, fill message buffer & then process them
+	if !p.remoteQ.IsFull() {
+		p.inBuf.Fill(p.in)
+		for !p.inBuf.IsEmpty() {
+			p.HandleMessage(p.inBuf.Next())
+			n++
+		}
 	}
 
 	// Drain local & remote traffic to appropriate destinations
-	n += p.localQ.Drain(p.localSink)
-	n += p.remoteQ.Drain(p.remoteSink)
+	remoteW := true
+	localW := true
+	for remoteW || localW {
+		if localW {
+			localW = p.localQ.Write(p.localSink)
+			n++
+		}
+		if remoteW {
+			remoteW = p.remoteQ.Write(p.remoteSink)
+			n++
+		}
+	}
+
 	return n
 }
 
@@ -165,12 +176,15 @@ func (p * Peer) Uninterested() {
 }
 
 func (p * Peer) Have(index uint32) {
+
+	// Validate
 	if !p.state.bitfield.IsValid(index) {
 		p.Close(newError("Invalid index received: %v", index))
 	}
 
 	if !p.state.bitfield.Have(index) {
 
+		// Update bitfield, check for remote seed & update availability
 		p.state.bitfield.Set(index)
 		p.state.remoteInterest = !p.state.bitfield.IsComplete()
 		p.pieceMap.Inc(index)
@@ -205,14 +219,15 @@ func (p * Peer) Block(index, begin uint32, block []byte) {
 }
 
 func (p * Peer) Bitfield(bits []byte) {
-	// Create new bitfield
+
+	// Create & validate bitfield
 	var err error
-	p.state.bitfield, err = NewFromBytes(bits, p.state.bitfield.Size())
+	p.state.bitfield, err = NewBitSetFrom(bits, p.state.bitfield.Size())
 	if err != nil {
 		p.Close(err)
 	}
 
-	// Add to global piece map
+	// Update availability in global piece map
 	p.pieceMap.IncAll(p.state.bitfield)
 
 	// Check if we are interested
@@ -235,11 +250,11 @@ func (p * Peer) isNowInteresting(index uint32) bool {
 
 func (p * Peer) Close(err error) {
 
-	// Update piece map
+	// Update availability & return all blocks
 	p.pieceMap.DecAll(p.state.bitfield)
-
-	// Return outstanding blocks
 	p.pieceMap.ReturnBlocks(p.localQ.ClearAll())
+
+	// ...
 
 	// Invoke on close
 	p.onCloseFn(err)
@@ -250,8 +265,20 @@ func (p * Peer) BlocksRequired() uint {
 	return uint(p.localQ.Capacity() - p.localQ.Size())
 }
 
+func (p * Peer) BlockWritten(index, begin uint32) {
+	// Update piece and check if finished
+	piece := p.pieceMap.Piece(index)
+	piece.BlockDone(begin)
+	if piece.IsComplete() {
+
+		// TODO: Must validate hash is correct.
+
+		p.localQ.Add(Have(index))
+	}
+}
+
 func (p * Peer) CanDownload() bool {
-	return !p.state.localChoke && p.state.localInterest && p.BlocksRequired() > 0
+	return !p.state.localChoke && p.state.localInterest && !p.localQ.IsFull()
 }
 
 // ----------------------------------------------------------------------------------

@@ -27,7 +27,7 @@ func NewBitSet(size uint32) *BitSet {
 	return &BitSet { make([]uint8, len), size, false }
 }
 
-func NewFromBytes(bits []byte, size uint32) (*BitSet, error) {
+func NewBitSetFrom(bits []byte, size uint32) (*BitSet, error) {
 
 	// Ensure spare bits are not set
 	if i := uint32(size % 8); i != 0 {

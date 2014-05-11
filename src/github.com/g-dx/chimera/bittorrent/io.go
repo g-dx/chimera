@@ -60,180 +60,181 @@ func NewLocalMessageSink(id PeerIdentity,
 }
 
 // ----------------------------------------------------------------------------------
-// PeerRequestQueue - manages requests for blocks
+// BlockRequestStatus - tracks the progress of requesting blocks
 // ----------------------------------------------------------------------------------
 
-type PeerRequestQueue struct {
-	new      []*TimedRequestMessage  // Newly received (from network or block picker) requests
-	pending  []*TimedRequestMessage  // Submitted (to disk or network) requests
-	received []*BlockMessage    // Received blocks (from network or disk)
-	other    [] ProtocolMessage // All other protocol messages (Have, Interested, etc)
-	cap      int
+const (
+	new = iota
+	pending
+	received
+)
+
+type BlockRequestStatus struct {
+	state    int
+	req      *RequestMessage
+	block    *BlockMessage
+	start    time.Time
 }
 
-type TimedRequestMessage struct {
-	req *RequestMessage
-	start time.Time
+func NewBlockRequestStatus(req *RequestMessage) *BlockRequestStatus {
+	return &BlockRequestStatus {
+		state : new,
+		req : req,
+		block : nil,
+		start : time.Now(),
+	}
 }
 
-func NewPeerRequestQueue(cap int) *PeerRequestQueue {
-	return &PeerRequestQueue {
-		new      : make([]*TimedRequestMessage, 0, cap),
-		pending  : make([]*TimedRequestMessage, 0, cap),
-		received : make([]*BlockMessage, 0, cap),
+// ----------------------------------------------------------------------------------
+// MessageQueue - manages protocol messages
+//
+//  <- removed  | RECEIVED | RECEIVED | PENDING | PENDING |  NEW  |  <- added
+//
+// ----------------------------------------------------------------------------------
+
+type MessageQueue struct {
+	reqs  []*BlockRequestStatus
+	other [] ProtocolMessage
+	cap   int
+}
+
+func NewMessageQueue(cap int) *MessageQueue {
+	return &MessageQueue {
+		reqs     : make([]*BlockRequestStatus, 0, cap),
 		other    : make([] ProtocolMessage, 0, cap),
 		cap      : cap,
 	}
 }
 
-func (pq * PeerRequestQueue) ClearNew() []*RequestMessage {
-
-	// Collect all outstanding new requests
-	reqs := make([]*RequestMessage, 0, len(pq.new))
-	for _, req := range pq.new {
-		reqs = append(reqs, req.req)
-	}
-
-	// NOTE: This does not make the elements of the slice eligible for GC!
-	pq.new = pq.new[:0]
-	return reqs
+func (mq * MessageQueue) ClearNew() []*RequestMessage {
+	return mq.Clear(func(brt *BlockRequestStatus) bool {
+		return brt.state == new
+	})
 }
 
-func (pq * PeerRequestQueue) ClearExpired(t time.Duration) []*RequestMessage {
+func (mq * MessageQueue) ClearExpired(t time.Duration) []*RequestMessage {
+	return mq.Clear(func(brt * BlockRequestStatus) bool {
+		return (brt.state == new || brt.state == pending) && brt.start.Add(t).After(time.Now())
+	})
+}
 
-	// NOTE: Can optimise this by starting at the other end & breaking on the
-	//       first value to not be expired.
-	var reqs []*RequestMessage
-	for i, req := range pq.new {
-		if req.start.Add(t).After(time.Now()) {
+func (mq * MessageQueue) ClearAll() []*RequestMessage {
+	return mq.Clear(func(_ * BlockRequestStatus) bool { return true })
+}
+
+func (mq * MessageQueue) Remove(index, begin, length uint32) {
+	mq.Clear(func(brt * BlockRequestStatus) bool {
+		return brt.req.Index() == index &&
+			   brt.req.Begin() == begin &&
+			   brt.req.Length() == length
+	})
+}
+
+func (mq * MessageQueue) Clear(p func(*BlockRequestStatus) bool) []*RequestMessage {
+
+	// Collect all cleared requests
+	reqs := make([]*RequestMessage, 0, mq.cap)
+	for i, req := range mq.reqs {
+		if p(req) {
+			// Remove & append to cleared list
+			mq.reqs = append(mq.reqs[:i], mq.reqs[i+1:]...)
 			reqs = append(reqs, req.req)
-			pq.new = append(pq.new[:i], pq.new[i+1:]...)
 		}
 	}
-
-	for i, req := range pq.pending {
-		if req.start.Add(t).After(time.Now()) {
-			reqs = append(reqs, req.req)
-			pq.pending = append(pq.pending[:i], pq.pending[i+1:]...)
-		}
-	}
-
 	return reqs
 }
 
-func (pq * PeerRequestQueue) ClearAll() []*RequestMessage {
-
-	// Collect all outstanding requests
-	reqs := make([]*RequestMessage, 0, len(pq.new) + len(pq.pending))
-	reqs = append(reqs, pq.ClearNew()...)
-	for _, req := range pq.pending {
-		reqs = append(reqs, req.req)
-	}
-
-	// NOTE: This does not make the elements of the slice eligible for GC!
-	pq.pending = pq.pending[:0]
-	return reqs
+func (mq * MessageQueue) IsFull() bool {
+	return mq.Size() < mq.cap
 }
 
-func (pq * PeerRequestQueue) Remove(index, begin, length uint32) {
-
-	var req *TimedRequestMessage
-	req, pq.new = RemoveRequest(index, begin, length, pq.new)
-	if req != nil {
-		return
-	}
-
-	req, pq.pending = RemoveRequest(index, begin, length, pq.pending)
-	if req != nil {
-		return
-	}
+func (mq * MessageQueue) Size() int {
+	return len(mq.reqs)
 }
 
-func RemoveRequest(index, begin, length uint32, reqs []*TimedRequestMessage) (*TimedRequestMessage, []*TimedRequestMessage) {
-	for i, req := range reqs {
-		if req.req.Index() == index &&
-		   req.req.Begin() == begin &&
-		   req.req.Length() == length {
-			return reqs[i], append(reqs[:i], reqs[i+1:]...)
-		}
-	}
-	return nil, reqs
+func (mq * MessageQueue) Capacity() int {
+	return mq.cap
 }
 
-func (pq * PeerRequestQueue) IsFull() bool {
-	return pq.Size() < pq.cap
-}
-
-func (pq * PeerRequestQueue) Size() int {
-	return len(pq.new) + len(pq.pending)
-}
-
-func (pq * PeerRequestQueue) Capacity() int {
-	return pq.cap
-}
-
-func (pq * PeerRequestQueue) Add(m ProtocolMessage) {
+func (mq * MessageQueue) Add(m ProtocolMessage) {
 	switch msg := m.(type) {
 	case *BlockMessage:
 
-		// If not in pending queue - skip block
-		for i, req := range pq.pending {
+		// Check we have pending request for this block, otherwise skip
+		for i, req := range mq.reqs {
 			if req.req.Index() == msg.Index() &&
 			   req.req.Begin() == msg.Begin() &&
-			   req.req.Length() == uint32(len(msg.Block())) {
-				pq.received = append(pq.received, msg)
-				pq.pending = append(pq.pending[:i], pq.pending[i+1:]...)
+			   req.req.Length() == uint32(len(msg.Block())) &&
+			   req.state == pending {
+
+				mq.reqs[i].block = msg
 				break
 			}
 		}
 
 		// NOTE: Could add logic to check if we ever requested this
 
-	case *RequestMessage: pq.new = append(pq.new, &TimedRequestMessage{msg, time.Now()})
-	default: pq.other = append(pq.other, msg)
+	case *RequestMessage: mq.reqs = append(mq.reqs, NewBlockRequestStatus(msg))
+	default: mq.other = append(mq.other, msg)
 	}
 }
 
-func (pq * PeerRequestQueue) Drain(sink *MessageSink) int{
+func (mq * MessageQueue) Write(sink *MessageSink) bool {
 
-	// Attempt to drain all request & blocks
-	n := 0
-	for {
-		req := false
-		if len(pq.new) > 0 {
-			ok := sink.Write(pq.new[0].req)
-			if ok {
-				pq.pending = append(pq.pending, pq.new[0])
-				pq.new = pq.new[1:]
-				req = true
-				n++
-			}
+	// I/O flags
+	var request, block, other bool
+
+	// 1. Find request & block to write (if any)
+	var newReq, receivedReq *BlockRequestStatus
+	var index int
+	for i, req := range mq.reqs {
+		if req.state == received && receivedReq == nil {
+			receivedReq = req
+			index = i
 		}
-
-		block := false
-		if len(pq.received) > 0 {
-			ok := sink.Write(pq.received[0])
-			if ok {
-				pq.received = pq.received[1:]
-				block = true
-				n++
-			}
-		}
-
-		other := false
-		if len(pq.other) > 0 {
-			ok := sink.Write(pq.other[0])
-			if ok {
-				pq.other = pq.other[1:]
-				other = true
-				n++
-			}
-		}
-
-		// If no I/O this loop break...
-		if !req || !block || !other {
-			break
+		if req.state == new && newReq == nil {
+			newReq = req
 		}
 	}
-	return n
+
+	// 2. Send request and or block
+	if newReq != nil {
+		request = mq.WriteRequest(newReq, sink)
+	}
+	if receivedReq != nil {
+		block = mq.WriteBlock(index, receivedReq, sink)
+	}
+
+	// 3. Send general protocol traffic
+	if len(mq.other) > 0 {
+		 other = mq.WriteMessage(mq.other[0], sink)
+	}
+
+	// Did we perform some I/O?
+	return request || block || other
+}
+
+func (mq * MessageQueue) WriteBlock(i int, brs *BlockRequestStatus, sink *MessageSink) bool {
+	ok := sink.Write(brs.block)
+	if ok {
+		mq.reqs = append(mq.reqs[:i], mq.reqs[i+1:]...) // Remove
+	}
+	return ok
+}
+
+func (mq * MessageQueue) WriteRequest(brs *BlockRequestStatus, sink *MessageSink) bool {
+	ok := sink.Write(brs.req)
+	if ok {
+		brs.state = pending
+	}
+	return ok
+}
+
+
+func (mq * MessageQueue) WriteMessage(msg ProtocolMessage, sink *MessageSink) bool {
+	ok := sink.Write(msg)
+	if ok {
+		mq.other = mq.other[1:]
+	}
+	return ok
 }
