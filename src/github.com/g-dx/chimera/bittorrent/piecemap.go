@@ -1,7 +1,5 @@
 package bittorrent
 
-import "hash"
-
 const (
 	_16KB = uint32(16 * 1024)
 	_128KB = uint32(128 * 1024)
@@ -107,7 +105,6 @@ type Piece struct {
 	lastBlockLen uint32
 	availability uint32
 	state int
-	sha1 hash.Hash
 }
 
 func NewPiece(i, len uint32) *Piece {

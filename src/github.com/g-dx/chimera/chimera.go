@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"github.com/g-dx/chimera/bittorrent"
 	"time"
-	"runtime"
 )
 
 func main() {

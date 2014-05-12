@@ -87,8 +87,7 @@ func mockDisk(reader <-chan DiskMessage, logger *log.Logger) {
 type DiskAccess struct {
 	files []*os.File
 	lens []uint64
-	hashes [][]byte
-	pieceLen uint64
+	mi *MetaInfo
 	in <-chan DiskMessage
 	out chan<- DiskMessageResult
 	log *log.Logger
@@ -110,8 +109,7 @@ func NewDiskAccess(mi *MetaInfo,
 	da := &DiskAccess{
 		files : files,
 		lens  : lens,
-		hashes : mi.Hashes,
-		pieceLen : uint64(mi.PieceLength),
+		mi : mi,
 		in : in,
 		out : out,
 		log : log,
@@ -221,19 +219,17 @@ func (da DiskAccess) onIO(buf []byte,
 					      index, begin uint32,
 	                      ioFn func(*os.File, []byte, uint64) (int, error)) error {
 
-	start := (uint64(index) * da.pieceLen) + uint64(begin)
-	var bufOff, prevLen uint64 = 0, 0
+	start := (uint64(index) * uint64(da.mi.PieceLength)) + uint64(begin)
+	var bufOff uint64 = 0
 
 	for i, len := range da.lens {
 		if start <= len {
 
-			// Perform I/O until done or EOF
-			if i > 0 {
-				prevLen = da.lens[i-1]
-			}
-			n, err := ioFn(da.files[i], buf[bufOff:], (start + bufOff) - prevLen)
+			// Calculate offset & perform I/O
+			off := (start + bufOff) - da.mi.Files[i].Length
+			n, err := ioFn(da.files[i], buf[bufOff:], off)
 
-			// Reached end of file - skip to next
+			// Reached end of file - move to next & continue
 			if err == io.EOF {
 				bufOff += uint64(n)
 				continue
