@@ -38,6 +38,10 @@ type PeerIdentity struct {
 	address string // ip:port
 }
 
+func (pi PeerIdentity) Equals(ip PeerIdentity) bool {
+	return bytes.Equal(pi.id, ip.id) && pi.address == ip.address
+}
+
 func (pi PeerIdentity) String() string {
 	return pi.address
 }
@@ -65,8 +69,9 @@ func NewConnection(addr string) (*PeerConnection, error) {
 			c : nil,
 			conn : conn,
 			buffer : make([]byte, 0),
-			pending : make([]ProtocolMessage, 0, MAX_INCOMING_BUFFER),
+			pending : make([]*ProtocolMessageWithId, 0, MAX_INCOMING_BUFFER),
 			readHandshake : false,
+			id : PeerIdentity { nil, "" },
 		},
 		out : OutgoingPeerConnection {
 			close : c,
@@ -79,7 +84,7 @@ func NewConnection(addr string) (*PeerConnection, error) {
 }
 
 func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
-									 out chan<- ProtocolMessage,
+									 out chan<- *ProtocolMessageWithId,
 									 e chan<- error,
                                      handshake *HandshakeMessage,
 									 logDir string) (*PeerIdentity, error) {
@@ -102,6 +107,7 @@ func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
 
 	// Connect up channels
 	pc.in.c = out
+	pc.in.id = *id
 	pc.out.c = in
 
 	// Start goroutines
@@ -135,7 +141,7 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (pi 
 	pc.in.pending = pc.in.pending[1:]
 
 	// Assert handshake
-	inHandshake, ok := msg.(*HandshakeMessage)
+	inHandshake, ok := msg.Msg().(*HandshakeMessage)
 	if !ok {
 		return nil, errFirstMessageNotHandshake
 	}
@@ -144,6 +150,7 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (pi 
 	if !bytes.Equal(outHandshake.infoHash, inHandshake.infoHash) {
 		return nil, errHashesNotEquals
 	}
+
 	return &PeerIdentity { inHandshake.infoHash, pc.in.conn.RemoteAddr().String() }, nil
 }
 
@@ -171,12 +178,13 @@ func (pc *PeerConnection) Close() error {
 
 type IncomingPeerConnection struct {
 	close <-chan struct{}
-	c chan<- ProtocolMessage
+	c chan<- *ProtocolMessageWithId
 	conn net.Conn
 	buffer []byte
-	pending []ProtocolMessage
+	pending []*ProtocolMessageWithId
 	readHandshake bool
 	logger *log.Logger
+	id PeerIdentity
 }
 
 func (ic * IncomingPeerConnection) loop(err chan<- error) {
@@ -214,9 +222,9 @@ func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (int) {
 	return n
 }
 
-func (ic * IncomingPeerConnection) maybeEnableSend() (chan<- ProtocolMessage, ProtocolMessage) {
-	var c chan<- ProtocolMessage
-	var next ProtocolMessage
+func (ic * IncomingPeerConnection) maybeEnableSend() (chan<- *ProtocolMessageWithId, *ProtocolMessageWithId) {
+	var c chan<- *ProtocolMessageWithId
+	var next *ProtocolMessageWithId
 	if len(ic.pending) > 0 {
 		next = ic.pending[0]
 		c = ic.c
@@ -225,14 +233,14 @@ func (ic * IncomingPeerConnection) maybeEnableSend() (chan<- ProtocolMessage, Pr
 }
 
 func (ic * IncomingPeerConnection) maybeReadMessage() {
-	var msg ProtocolMessage
+	var msg *ProtocolMessageWithId
 	if !ic.readHandshake {
-		ic.buffer, msg = ReadHandshake(ic.buffer)
+		ic.buffer, msg = ReadHandshake(ic.buffer, ic.id)
 		if msg != nil {
 			ic.readHandshake = true
 		}
 	} else {
-		ic.buffer, msg = Unmarshal(ic.buffer)
+		ic.buffer, msg = UnmarshalWithId(ic.buffer, ic.id)
 	}
 
 	if msg != nil {
@@ -240,7 +248,7 @@ func (ic * IncomingPeerConnection) maybeReadMessage() {
 	}
 
 	// Remove keepalive
-	if msg != nil && msg != KeepAliveMessage {
+	if msg != nil && msg.Msg() != KeepAliveMessage {
 		ic.pending = append(ic.pending, msg)
 	}
 }

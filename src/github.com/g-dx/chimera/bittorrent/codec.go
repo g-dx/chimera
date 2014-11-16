@@ -38,6 +38,19 @@ const (
 // Basic message
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
+type ProtocolMessageWithId struct {
+	msg ProtocolMessage
+	peerid PeerIdentity
+}
+
+func (m ProtocolMessageWithId) PeerId() PeerIdentity {
+	return m.peerid
+}
+
+func (m ProtocolMessageWithId) Msg() ProtocolMessage {
+	return m.msg
+}
+
 type ProtocolMessage interface {
 	Id() byte
 	Len() uint32
@@ -307,7 +320,7 @@ func Cancel(index, begin, length uint32) *CancelMessage {
 	}
 }
 
-func ReadHandshake(buf []byte) ([]byte, ProtocolMessage) {
+func ReadHandshake(buf []byte, id PeerIdentity) ([]byte, *ProtocolMessageWithId) {
 
 	// Do we have enough data for handshake?
 	if len(buf) < int(handshakeLength) {
@@ -320,7 +333,7 @@ func ReadHandshake(buf []byte) ([]byte, ProtocolMessage) {
 
 	// TODO: Assert the protocol & reserved bytes?
 
-	return remainingBuf, handshake(data[28:48], data[48:handshakeLength])
+	return remainingBuf, &ProtocolMessageWithId{msg : handshake(data[28:48], data[48:handshakeLength]), peerid : id}
 }
 
 func Marshal(pm ProtocolMessage) []byte {
@@ -357,6 +370,11 @@ func Marshal(pm ProtocolMessage) []byte {
 	}
 
 	return w.Bytes()
+}
+
+func UnmarshalWithId(buf []byte, id PeerIdentity) ([]byte, *ProtocolMessageWithId) {
+	remaining, msg := Unmarshal(buf)
+	return remaining, &ProtocolMessageWithId { msg : msg, peerid : id }
 }
 
 func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {

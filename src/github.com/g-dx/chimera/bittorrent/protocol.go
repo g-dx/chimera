@@ -24,6 +24,7 @@ type PeerCoordinator struct {
 	logger *log.Logger
 	diskR chan DiskMessage
 	diskResult <-chan DiskMessageResult
+	protocol chan *ProtocolMessageWithId
 }
 
 func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*PeerCoordinator, error) {
@@ -55,6 +56,7 @@ func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 		dir : dir,
 		logger : logger,
 		diskR : diskR,
+		protocol : make(chan *ProtocolMessageWithId, 100),
 	}
 
 	// Start loop & return
@@ -83,6 +85,15 @@ func (pc * PeerCoordinator) loop() {
 
 		case r := <- pc.trackerResponses:
 			pc.onTrackerResponse(r)
+
+		case msg := <- pc.protocol:
+			for _, p := range pc.peers {
+				if p.Id().Equals(msg.PeerId())  {
+					p.HandleMessage(msg.Msg())
+				}
+			}
+
+			// TODO: msg.Dispose() -> Pool.Put(msg)
 
 		case p := <- pc.addPeer:
 			pc.peers = append(pc.peers, p)
@@ -135,14 +146,13 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 		return
 	}
 
-	in := make(<-chan ProtocolMessage, 10)
-	out := make(chan<- ProtocolMessage, 10)
+	in := make(chan ProtocolMessage, 10)
 	disk := make(chan<- DiskMessage, 10)
 	e := make(chan error, 3) // error sources -> reader, writer, peer
 	outHandshake := Handshake(pc.metaInfo.InfoHash)
 
 	// Attempt to establish connection
-	id, err := conn.Establish(in, out, e, outHandshake, pc.dir)
+	id, err := conn.Establish(in, pc.protocol, e, outHandshake, pc.dir)
 	if err != nil {
 		pc.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
 		conn.Close()
@@ -166,7 +176,7 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 	}
 
 	// Connected
-	p := NewPeer(*id, in, out, disk, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
+	p := NewPeer(*id, in, disk, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
 	pc.logger.Printf("New Peer: %v\n", p)
 	pc.addPeer <- p
 }

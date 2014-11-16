@@ -45,8 +45,7 @@ type Peer struct {
 	remoteQ, localQ * MessageQueue
 	remoteSink, localSink * MessageSink
 
-	// Incoming & connection error channels
-	in  <-chan ProtocolMessage
+	// Connection error channels
 	err <-chan error
 
 	// State of peer
@@ -68,7 +67,6 @@ type Peer struct {
 }
 
 func NewPeer(id PeerIdentity,
-			 in <-chan ProtocolMessage,
 		     out chan<- ProtocolMessage,
 			 disk chan<- DiskMessage,
 			 mi * MetaInfo,
@@ -85,8 +83,6 @@ func NewPeer(id PeerIdentity,
 		localQ     : NewMessageQueue(RequestQueueSize),
 		localSink  : NewLocalMessageSink(id, out, disk),
 
-		in      : in,
-
 		id         : id,
 		pieceMap   : pieceMap,
 		state      : NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
@@ -97,6 +93,10 @@ func NewPeer(id PeerIdentity,
 		statistics : &Statistics{},
 		onCloseFn : onCloseFn,
 	}
+}
+
+func (p * Peer) Id() PeerIdentity {
+	return p.id
 }
 
 func (p * Peer) ProcessMessages() int {
@@ -114,15 +114,6 @@ func (p * Peer) ProcessMessages() int {
 
 	// Return expired requests to map
 	p.pieceMap.ReturnBlocks(p.localQ.ClearExpired(ThirtySeconds))
-
-	// If we have space, fill message buffer & then process them
-	if !p.remoteQ.IsFull() {
-		p.inBuf.Fill(p.in)
-		for !p.inBuf.IsEmpty() {
-			p.HandleMessage(p.inBuf.Next())
-			n++
-		}
-	}
 
 	// Drain local & remote traffic to appropriate destinations
 	remoteW := true
