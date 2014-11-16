@@ -8,9 +8,8 @@ import (
 )
 
 var (
-	QUARTER_OF_A_SECOND = 250 * time.Millisecond
-	FIFTY_MILLISECONDS  = 50 * time.Millisecond
-	idealPeers          = 25
+	FIFTY_MILLISECONDS = 50 * time.Millisecond
+	idealPeers         = 25
 )
 
 type ProtocolHandler struct {
@@ -96,27 +95,6 @@ func (ph *ProtocolHandler) loop() {
 
 		case p := <-ph.addPeer:
 			ph.peers = append(ph.peers, p)
-
-		default:
-			ph.processMessagesFor(QUARTER_OF_A_SECOND)
-		}
-	}
-}
-
-func (ph *ProtocolHandler) processMessagesFor(d time.Duration) {
-
-	// Set a maximum amount of
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-
-		msgs := 0
-		for _, p := range ph.peers {
-			msgs += p.ProcessMessages()
-		}
-
-		// If we did nothing this loop - wait for more data to arrive
-		if msgs == 0 {
-			time.Sleep(FIFTY_MILLISECONDS)
 		}
 	}
 }
@@ -128,7 +106,7 @@ func (ph *ProtocolHandler) onTrackerResponse(r *TrackerResponse) {
 
 		// Add some
 		for _, pa := range r.PeerAddresses[25:] {
-			go ph.handlePeerConnect(pa, ph.pieceMap)
+			go ph.handlePeerConnect(pa)
 			peerCount++
 			if peerCount == idealPeers {
 				break
@@ -137,7 +115,7 @@ func (ph *ProtocolHandler) onTrackerResponse(r *TrackerResponse) {
 	}
 }
 
-func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress, pieceMap *PieceMap) {
+func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 
 	conn, err := NewConnection(addr.GetIpAndPort())
 	if err != nil {
@@ -175,7 +153,7 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress, pieceMap *PieceMa
 	}
 
 	// Connected
-	p := NewPeer(*id, in, disk, ph.metaInfo, pieceMap, e, ph.logger, onPeerClose)
+	p := NewPeer(*id, in, disk, ph.metaInfo, ph.pieceMap, e, ph.logger, onPeerClose)
 	ph.logger.Printf("New Peer: %v\n", p)
 	ph.addPeer <- p
 }
