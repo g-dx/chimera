@@ -1,12 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/g-dx/chimera/bittorrent"
+	"io/ioutil"
 	"os"
 	"runtime/pprof"
-	"io/ioutil"
-	"bytes"
-	"github.com/g-dx/chimera/bittorrent"
 	"time"
 )
 
@@ -40,20 +40,20 @@ func main() {
 		return
 	}
 
-//	fmt.Printf("Duration: %s\n", time.Since(now))
-//	_, err = json.MarshalIndent(metaInfo, "", " ")
-//	fmt.Printf("Decoded Data:\n%v\n", metaInfo)
+	//	fmt.Printf("Duration: %s\n", time.Since(now))
+	//	_, err = json.MarshalIndent(metaInfo, "", " ")
+	//	fmt.Printf("Decoded Data:\n%v\n", metaInfo)
 
 	// Create request
 	req := &bittorrent.TrackerRequest{
-		Url : metaInfo.Announce,
-		InfoHash : metaInfo.InfoHash,
-		NumWanted : 50,
-		Left : metaInfo.TotalLength(),
+		Url:       metaInfo.Announce,
+		InfoHash:  metaInfo.InfoHash,
+		NumWanted: 50,
+		Left:      metaInfo.TotalLength(),
 	}
 
-//	reqJson, err := json.MarshalIndent(req, "", " ")
-//	fmt.Printf("Params:%v\n", reqJson)
+	//	reqJson, err := json.MarshalIndent(req, "", " ")
+	//	fmt.Printf("Params:%v\n", reqJson)
 
 	_, err = bittorrent.QueryTracker(req)
 	if err != nil {
@@ -64,27 +64,27 @@ func main() {
 
 	// Create log directory
 	dir := fmt.Sprintf("/Users/Dakeyras/.chimera/%v [...%x]",
-		               time.Now().Format("2006-01-02 15.04.05"),
-		               metaInfo.InfoHash[15:])
-	err = os.Mkdir(dir, os.ModeDir | os.ModePerm)
+		time.Now().Format("2006-01-02 15.04.05"),
+		metaInfo.InfoHash[15:])
+	err = os.Mkdir(dir, os.ModeDir|os.ModePerm)
 	if err != nil {
 		fmt.Printf("Failed to create torrent dir: %v\n", err)
 	}
 
-//	tr := make(chan *bittorrent.TrackerResponse)
-//	pc, err := bittorrent.NewPeerCoordinator(metaInfo, dir, tr)
-//	if err != nil {
-//		fmt.Printf("Failed to create coordinator: %v\n", err)
-//		return
-//	}
-//
-//	// Send tracker response
-//	tr <- resp
-//
-//	// Wait until everything is finished
-//	pc.AwaitDone()
+	//	tr := make(chan *bittorrent.TrackerResponse)
+	//	pc, err := bittorrent.NewProtocolHandler(metaInfo, dir, tr)
+	//	if err != nil {
+	//		fmt.Printf("Failed to create coordinator: %v\n", err)
+	//		return
+	//	}
+	//
+	//	// Send tracker response
+	//	tr <- resp
+	//
+	//	// Wait until everything is finished
+	//	pc.AwaitDone()
 
-//	fmt.Printf("No of CPUs: %v\n", runtime.NumCPU())
+	//	fmt.Printf("No of CPUs: %v\n", runtime.NumCPU())
 
 	dIn := make(chan bittorrent.DiskMessage)
 	dOut := make(chan bittorrent.DiskMessageResult)

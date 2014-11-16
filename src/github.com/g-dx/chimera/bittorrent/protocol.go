@@ -1,33 +1,33 @@
 package bittorrent
 
 import (
-	"time"
 	"fmt"
 	"log"
 	"os"
+	"time"
 )
 
 var (
 	QUARTER_OF_A_SECOND = 250 * time.Millisecond
-	FIFTY_MILLISECONDS = 50 * time.Millisecond
-	idealPeers = 25
+	FIFTY_MILLISECONDS  = 50 * time.Millisecond
+	idealPeers          = 25
 )
 
-type PeerCoordinator struct {
-	metaInfo *MetaInfo
-	peers []*Peer
+type ProtocolHandler struct {
+	metaInfo         *MetaInfo
+	peers            []*Peer
 	trackerResponses <-chan *TrackerResponse
-	addPeer chan *Peer
-	pieceMap *PieceMap
-	done chan struct{}
-	dir string
-	logger *log.Logger
-	diskR chan DiskMessage
-	diskResult <-chan DiskMessageResult
-	protocol chan *ProtocolMessageWithId
+	addPeer          chan *Peer
+	pieceMap         *PieceMap
+	done             chan struct{}
+	dir              string
+	logger           *log.Logger
+	diskR            chan DiskMessage
+	diskResult       <-chan DiskMessageResult
+	protocol         chan *ProtocolMessageWithId
 }
 
-func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*PeerCoordinator, error) {
+func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*ProtocolHandler, error) {
 
 	// Create log file
 	// Create log file & create loggers
@@ -35,83 +35,82 @@ func NewPeerCoordinator(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 	if err != nil {
 		return nil, err
 	}
-	logger := log.New(f, "", log.Ldate | log.Ltime)
+	logger := log.New(f, "", log.Ldate|log.Ltime)
 
 	// Start fake disk reader
 	diskR := make(chan DiskMessage)
 	go mockDisk(diskR, logger)
 
-
 	// Create piece map
 	pieceMap := NewPieceMap(uint32(len(mi.Hashes)), mi.PieceLength, mi.TotalLength())
 
 	// Create coordinator
-	pc := &PeerCoordinator{
-		metaInfo : mi,
-		peers : make([]*Peer, 0, idealPeers),
-		trackerResponses : tr,
-		addPeer : make(chan *Peer),
-		pieceMap : pieceMap,
-		done : make(chan struct{}),
-		dir : dir,
-		logger : logger,
-		diskR : diskR,
-		protocol : make(chan *ProtocolMessageWithId, 100),
+	ph := &ProtocolHandler{
+		metaInfo:         mi,
+		peers:            make([]*Peer, 0, idealPeers),
+		trackerResponses: tr,
+		addPeer:          make(chan *Peer),
+		pieceMap:         pieceMap,
+		done:             make(chan struct{}),
+		dir:              dir,
+		logger:           logger,
+		diskR:            diskR,
+		protocol:         make(chan *ProtocolMessageWithId, 100),
 	}
 
 	// Start loop & return
-	go pc.loop()
-	return pc, nil
+	go ph.loop()
+	return ph, nil
 }
 
-func (pc * PeerCoordinator) AwaitDone() {
+func (ph *ProtocolHandler) AwaitDone() {
 	// Await a receive to say we are finished...
-	<- pc.done
+	<-ph.done
 }
 
-func (pc * PeerCoordinator) loop() {
+func (ph *ProtocolHandler) loop() {
 
 	onPicker := time.After(1 * time.Second)
 	for {
 
 		select {
 
-		case <- onPicker:
-			PickPieces(pc.peers, pc.pieceMap)
+		case <-onPicker:
+			PickPieces(ph.peers, ph.pieceMap)
 			onPicker = time.After(1 * time.Second)
 
-		case <- time.After(10 * time.Second):
+		case <-time.After(10 * time.Second):
 			// Run choking algorithm
 
-		case r := <- pc.trackerResponses:
-			pc.onTrackerResponse(r)
+		case r := <-ph.trackerResponses:
+			ph.onTrackerResponse(r)
 
-		case msg := <- pc.protocol:
-			for _, p := range pc.peers {
-				if p.Id().Equals(msg.PeerId())  {
+		case msg := <-ph.protocol:
+			for _, p := range ph.peers {
+				if p.Id().Equals(msg.PeerId()) {
 					p.HandleMessage(msg.Msg())
 				}
 			}
 
 			// TODO: msg.Dispose() -> Pool.Put(msg)
 
-		case p := <- pc.addPeer:
-			pc.peers = append(pc.peers, p)
+		case p := <-ph.addPeer:
+			ph.peers = append(ph.peers, p)
 
 		default:
-			pc.processMessagesFor(QUARTER_OF_A_SECOND)
+			ph.processMessagesFor(QUARTER_OF_A_SECOND)
 		}
 	}
 }
 
-func (pc * PeerCoordinator) processMessagesFor(d time.Duration) {
+func (ph *ProtocolHandler) processMessagesFor(d time.Duration) {
 
 	// Set a maximum amount of
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
 
 		msgs := 0
-		for _, p := range pc.peers {
+		for _, p := range ph.peers {
 			msgs += p.ProcessMessages()
 		}
 
@@ -122,14 +121,14 @@ func (pc * PeerCoordinator) processMessagesFor(d time.Duration) {
 	}
 }
 
-func (pc * PeerCoordinator) onTrackerResponse(r *TrackerResponse) {
+func (ph *ProtocolHandler) onTrackerResponse(r *TrackerResponse) {
 
-	peerCount := len(pc.peers)
+	peerCount := len(ph.peers)
 	if peerCount < idealPeers {
 
 		// Add some
 		for _, pa := range r.PeerAddresses[25:] {
-			go pc.handlePeerConnect(pa, pc.pieceMap)
+			go ph.handlePeerConnect(pa, ph.pieceMap)
 			peerCount++
 			if peerCount == idealPeers {
 				break
@@ -138,25 +137,25 @@ func (pc * PeerCoordinator) onTrackerResponse(r *TrackerResponse) {
 	}
 }
 
-func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceMap) {
+func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress, pieceMap *PieceMap) {
 
 	conn, err := NewConnection(addr.GetIpAndPort())
 	if err != nil {
-		pc.logger.Printf("Can't connect to [%v]: %v\n", addr, err)
+		ph.logger.Printf("Can't connect to [%v]: %v\n", addr, err)
 		return
 	}
 
 	in := make(chan ProtocolMessage, 10)
 	disk := make(chan<- DiskMessage, 10)
 	e := make(chan error, 3) // error sources -> reader, writer, peer
-	outHandshake := Handshake(pc.metaInfo.InfoHash)
+	outHandshake := Handshake(ph.metaInfo.InfoHash)
 
 	// Attempt to establish connection
-	id, err := conn.Establish(in, pc.protocol, e, outHandshake, pc.dir)
+	id, err := conn.Establish(in, ph.protocol, e, outHandshake, ph.dir)
 	if err != nil {
-		pc.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
+		ph.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
 		conn.Close()
-		return;
+		return
 	}
 
 	// NOTE: Pass this function to peer and when it closes itself or
@@ -166,23 +165,23 @@ func (pc * PeerCoordinator) handlePeerConnect(addr PeerAddress, pieceMap *PieceM
 		// 1. Log initial error which caused close (possibly nil)
 
 		// 2. Close connection
-		err = conn.Close();
+		err = conn.Close()
 		if err != nil {
 			// Can't really do anything about it...
 		}
 
 		// 3. Remove from list of peers
-//		pc.peers.remove();
+		//		ph.peers.remove();
 	}
 
 	// Connected
-	p := NewPeer(*id, in, disk, pc.metaInfo, pieceMap, e, pc.logger, onPeerClose)
-	pc.logger.Printf("New Peer: %v\n", p)
-	pc.addPeer <- p
+	p := NewPeer(*id, in, disk, ph.metaInfo, pieceMap, e, ph.logger, onPeerClose)
+	ph.logger.Printf("New Peer: %v\n", p)
+	ph.addPeer <- p
 }
 
-func (pc * PeerCoordinator) onDiskMessageResult(dmr DiskMessageResult) {
-	p := pc.FindPeer(dmr.Id())
+func (ph *ProtocolHandler) onDiskMessageResult(dmr DiskMessageResult) {
+	p := ph.FindPeer(dmr.Id())
 	switch msg := dmr.(type) {
 	case *DiskWriteResult:
 		if p != nil {
@@ -195,6 +194,6 @@ func (pc * PeerCoordinator) onDiskMessageResult(dmr DiskMessageResult) {
 	}
 }
 
-func (pc * PeerCoordinator) FindPeer(id PeerIdentity) *Peer {
+func (ph *ProtocolHandler) FindPeer(id PeerIdentity) *Peer {
 	return nil
 }
