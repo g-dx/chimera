@@ -12,33 +12,34 @@ var (
 	idealPeers         = 25
 )
 
+type PeerConnectResult struct {
+	peer *Peer
+	err  error
+	ok   bool
+}
+
 type ProtocolHandler struct {
 	metaInfo         *MetaInfo
 	peers            []*Peer
 	trackerResponses <-chan *TrackerResponse
-	addPeer          chan *Peer
+	newPeers         chan *Peer
 	pieceMap         *PieceMap
 	done             chan struct{}
 	dir              string
 	logger           *log.Logger
-	diskR            chan DiskMessage
-	diskResult       <-chan DiskMessageResult
-	protocol         chan *ProtocolMessageWithId
+	peerMsgs         chan *ProtocolMessageWithId
+	peerErrors       chan PeerError
+	heartbeat        int64
 }
 
 func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*ProtocolHandler, error) {
 
-	// Create log file
 	// Create log file & create loggers
-	f, err := os.Create(fmt.Sprintf("%v/coordinator.log", dir))
+	f, err := os.Create(fmt.Sprintf("%v/protocol.log", dir))
 	if err != nil {
 		return nil, err
 	}
 	logger := log.New(f, "", log.Ldate|log.Ltime)
-
-	// Start fake disk reader
-	diskR := make(chan DiskMessage)
-	go mockDisk(diskR, logger)
 
 	// Create piece map
 	pieceMap := NewPieceMap(uint32(len(mi.Hashes)), mi.PieceLength, mi.TotalLength())
@@ -48,13 +49,13 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 		metaInfo:         mi,
 		peers:            make([]*Peer, 0, idealPeers),
 		trackerResponses: tr,
-		addPeer:          make(chan *Peer),
+		newPeers:         make(chan *Peer),
 		pieceMap:         pieceMap,
 		done:             make(chan struct{}),
 		dir:              dir,
 		logger:           logger,
-		diskR:            diskR,
-		protocol:         make(chan *ProtocolMessageWithId, 100),
+		peerMsgs:         make(chan *ProtocolMessageWithId, 100),
+		peerErrors:       make(chan PeerError),
 	}
 
 	// Start loop & return
@@ -69,31 +70,22 @@ func (ph *ProtocolHandler) AwaitDone() {
 
 func (ph *ProtocolHandler) loop() {
 
-	onPicker := time.After(1 * time.Second)
 	for {
 
 		select {
-
-		case <-onPicker:
-			PickPieces(ph.peers, ph.pieceMap)
-			onPicker = time.After(1 * time.Second)
-
-		case <-time.After(10 * time.Second):
-			// Run choking algorithm
+		case <-time.After(ONE_SECOND):
+			ph.onHeartbeat()
 
 		case r := <-ph.trackerResponses:
 			ph.onTrackerResponse(r)
 
-		case msg := <-ph.protocol:
-			for _, p := range ph.peers {
-				if p.Id().Equals(msg.PeerId()) {
-					p.HandleMessage(msg.Msg())
-				}
-			}
+		case m := <-ph.peerMsgs:
+			ph.onPeerMessage(m.PeerId(), m.Msg())
 
-			// TODO: msg.Dispose() -> Pool.Put(msg)
+		case e := <-ph.peerErrors:
+			ph.onPeerError(e.Id(), e.Error())
 
-		case p := <-ph.addPeer:
+		case p := <-ph.newPeers:
 			ph.peers = append(ph.peers, p)
 		}
 	}
@@ -124,54 +116,80 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 	}
 
 	in := make(chan ProtocolMessage, 10)
-	disk := make(chan<- DiskMessage, 10)
-	e := make(chan error, 3) // error sources -> reader, writer, peer
 	outHandshake := Handshake(ph.metaInfo.InfoHash)
 
 	// Attempt to establish connection
-	id, err := conn.Establish(in, ph.protocol, e, outHandshake, ph.dir)
+	id, err := conn.Establish(in, ph.peerMsgs, ph.peerErrors, outHandshake, ph.dir)
 	if err != nil {
 		ph.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
 		conn.Close()
 		return
 	}
 
-	// NOTE: Pass this function to peer and when it closes itself or
-	//       close is called externally it calls back to cleanup coordinator
-	onPeerClose := func(err error) {
-
-		// 1. Log initial error which caused close (possibly nil)
-
-		// 2. Close connection
-		err = conn.Close()
-		if err != nil {
-			// Can't really do anything about it...
-		}
-
-		// 3. Remove from list of peers
-		//		ph.peers.remove();
-	}
-
 	// Connected
-	p := NewPeer(*id, in, disk, ph.metaInfo, ph.pieceMap, e, ph.logger, onPeerClose)
+	p := NewPeer(id, in, ph.metaInfo, ph.pieceMap, ph.logger)
 	ph.logger.Printf("New Peer: %v\n", p)
-	ph.addPeer <- p
+	ph.newPeers <- p
 }
 
-func (ph *ProtocolHandler) onDiskMessageResult(dmr DiskMessageResult) {
-	p := ph.FindPeer(dmr.Id())
-	switch msg := dmr.(type) {
-	case *DiskWriteResult:
-		if p != nil {
-			p.BlockWritten(msg.index, msg.begin)
+func (ph *ProtocolHandler) onPeerMessage(id *PeerIdentity, msg ProtocolMessage) {
+
+	p := ph.findPeer(id)
+	if p != nil {
+		err := p.OnMessage(msg)
+		if err != nil {
+			ph.closePeer(p, err)
 		}
-	case *DiskReadResult:
-		if p != nil {
-			p.remoteQ.Add(msg.b)
-		}
+	}
+
+	// TODO: msg.Dispose() -> Pool.Put(msg)
+
+}
+
+func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
+
+	// TODO:
+
+	// 1. Remove from peers
+	// 2. peer.Close()
+	// 3. Log errors
+}
+
+func (ph *ProtocolHandler) onHeartbeat() {
+
+	// Run choking algorithm
+	if ph.heartbeat%10 == 0 {
+		// Run choker
+	}
+
+	// Run piece picking algorithm
+	PickPieces(ph.peers, ph.pieceMap)
+
+	// Inc heartbeat
+	ph.heartbeat++
+}
+
+func (ph *ProtocolHandler) onPeerError(id *PeerIdentity, err error) {
+
+	p := ph.findPeer(id)
+	if p != nil {
+		ph.closePeer(p, err)
 	}
 }
 
-func (ph *ProtocolHandler) FindPeer(id PeerIdentity) *Peer {
+func (ph *ProtocolHandler) maybeConnect(r chan<- PeerConnectResult) {
+
+	peerCount := len(ph.peers)
+	if peerCount < idealPeers {
+
+	}
+}
+
+func (ph *ProtocolHandler) findPeer(id *PeerIdentity) *Peer {
+	for _, p := range ph.peers {
+		if p.Id().Equals(id) {
+			return p
+		}
+	}
 	return nil
 }

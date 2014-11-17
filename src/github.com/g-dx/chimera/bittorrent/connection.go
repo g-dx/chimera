@@ -1,55 +1,77 @@
 package bittorrent
 
 import (
-	"net"
-	"fmt"
-	"time"
-	"io"
-	"runtime"
 	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"log"
+	"net"
 	"os"
+	"runtime"
+	"time"
 )
 
 var (
 	MAX_OUTGOING_BUFFER = 25 // max pending messages to write out on connection
 	MAX_INCOMING_BUFFER = 25 // max pending messages to send upstream
-	READ_BUFFER_SIZE = 4096
+	READ_BUFFER_SIZE    = 4096
 
-	ONE_SECOND = 1 * time.Second
-	KEEP_ALIVE_PERIOD = 1 * time.Minute
-	DIAL_TIMEOUT = 10 * time.Second
-	HANDSHAKE_TIMEOUT = 5 * time.Second
-	ONE_HUNDRED_MILLIS = 100 * time.Millisecond
+	ONE_SECOND          = 1 * time.Second
+	KEEP_ALIVE_PERIOD   = 1 * time.Minute
+	DIAL_TIMEOUT        = 10 * time.Second
+	HANDSHAKE_TIMEOUT   = 5 * time.Second
+	ONE_HUNDRED_MILLIS  = 100 * time.Millisecond
 	FIVE_HUNDRED_MILLIS = 5 * ONE_HUNDRED_MILLIS
 
-	errHashesNotEquals = errors.New("Info hashes not equal")
-	errHandshakeNotReceived =
-		errors.New(fmt.Sprintf("Handshake not received in: %v", HANDSHAKE_TIMEOUT))
-	errFirstMessageNotHandshake =
-		errors.New("First message is not handshake")
-	errKeepAliveExpired =
-		errors.New("Read KeepAlive expired")
+	errHashesNotEquals          = errors.New("Info hashes not equal")
+	errHandshakeNotReceived     = errors.New(fmt.Sprintf("Handshake not received in: %v", HANDSHAKE_TIMEOUT))
+	errFirstMessageNotHandshake = errors.New("First message is not handshake")
+	errKeepAliveExpired         = errors.New("Read KeepAlive expired")
 )
 
+////////////////////////////////////////////////////////////////////////////////////////////////
+// PeerError - captures a low-level error specific to a peer
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type PeerError struct {
+	err error
+	id  *PeerIdentity
+}
+
+func (pe *PeerError) Error() error {
+	return pe.err
+}
+
+func (pe *PeerError) Id() *PeerIdentity {
+	return pe.id
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// PeerIdentity - represents a unique name for a connection to a peer
+////////////////////////////////////////////////////////////////////////////////////////////////
+
 type PeerIdentity struct {
-	id []byte      // from handshake
+	id      []byte // from handshake
 	address string // ip:port
 }
 
-func (pi PeerIdentity) Equals(ip PeerIdentity) bool {
+func (pi *PeerIdentity) Equals(ip *PeerIdentity) bool {
 	return bytes.Equal(pi.id, ip.id) && pi.address == ip.address
 }
 
-func (pi PeerIdentity) String() string {
+func (pi *PeerIdentity) String() string {
 	return pi.address
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////
+// PeerConnection - represents a read+write connection to a peer
+////////////////////////////////////////////////////////////////////////////////////////////////
+
 type PeerConnection struct {
-	close chan<- struct{}
-	in IncomingPeerConnection
-	out OutgoingPeerConnection
+	close  chan<- struct{}
+	in     IncomingPeerConnection
+	out    OutgoingPeerConnection
 	logger *log.Logger
 }
 
@@ -63,40 +85,39 @@ func NewConnection(addr string) (*PeerConnection, error) {
 
 	c := make(chan struct{}, 2) // 2 close messages - one for reader, other for writer
 	pc := &PeerConnection{
-		close : c,
-		in : IncomingPeerConnection {
-			close : c,
-			c : nil,
-			conn : conn,
-			buffer : make([]byte, 0),
-			pending : make([]*ProtocolMessageWithId, 0, MAX_INCOMING_BUFFER),
-			readHandshake : false,
-			id : PeerIdentity { nil, "" },
+		close: c,
+		in: IncomingPeerConnection{
+			close:         c,
+			c:             nil,
+			conn:          conn,
+			buffer:        make([]byte, 0),
+			pending:       make([]*ProtocolMessageWithId, 0, MAX_INCOMING_BUFFER),
+			readHandshake: false,
 		},
-		out : OutgoingPeerConnection {
-			close : c,
-			c : nil,
-			conn : conn,
-			curr : make([]byte, 0),
+		out: OutgoingPeerConnection{
+			close: c,
+			c:     nil,
+			conn:  conn,
+			curr:  make([]byte, 0),
 		},
 	}
 	return pc, nil
 }
 
-func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
-									 out chan<- *ProtocolMessageWithId,
-									 e chan<- error,
-                                     handshake *HandshakeMessage,
-									 logDir string) (*PeerIdentity, error) {
+func (pc *PeerConnection) Establish(in <-chan ProtocolMessage,
+	out chan<- *ProtocolMessageWithId,
+	e chan<- PeerError,
+	handshake *HandshakeMessage,
+	logDir string) (*PeerIdentity, error) {
 
 	// Create log file & create loggers
 	f, err := os.Create(fmt.Sprintf("%v/%v.log", logDir, pc.in.conn.RemoteAddr()))
 	if err != nil {
 		return nil, err
 	}
-	pc.in.logger  = log.New(f, " in  ->", log.Ldate | log.Ltime)
-	pc.out.logger = log.New(f, " out <-", log.Ldate | log.Ltime)
-	pc.logger     = log.New(f, "  -  --", log.Ldate | log.Ltime)
+	pc.in.logger = log.New(f, " in  ->", log.Ldate|log.Ltime)
+	pc.out.logger = log.New(f, " out <-", log.Ldate|log.Ltime)
+	pc.logger = log.New(f, "  -  --", log.Ldate|log.Ltime)
 
 	// Ensure we handshake properly
 	id, err := pc.completeHandshake(handshake)
@@ -107,12 +128,11 @@ func (pc * PeerConnection) Establish(in <-chan ProtocolMessage,
 
 	// Connect up channels
 	pc.in.c = out
-	pc.in.id = *id
 	pc.out.c = in
 
 	// Start goroutines
-	go pc.in.loop(e)
-	go pc.out.loop(e)
+	go pc.in.loop(e, id)
+	go pc.out.loop(e, id)
 
 	pc.logger.Println("Established")
 	return id, nil
@@ -151,7 +171,7 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (pi 
 		return nil, errHashesNotEquals
 	}
 
-	return &PeerIdentity { inHandshake.infoHash, pc.in.conn.RemoteAddr().String() }, nil
+	return &PeerIdentity{inHandshake.infoHash, pc.in.conn.RemoteAddr().String()}, nil
 }
 
 func (pc *PeerConnection) Close() error {
@@ -177,40 +197,41 @@ func (pc *PeerConnection) Close() error {
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type IncomingPeerConnection struct {
-	close <-chan struct{}
-	c chan<- *ProtocolMessageWithId
-	conn net.Conn
-	buffer []byte
-	pending []*ProtocolMessageWithId
+	close         <-chan struct{}
+	c             chan<- *ProtocolMessageWithId
+	conn          net.Conn
+	buffer        []byte
+	pending       []*ProtocolMessageWithId
 	readHandshake bool
-	logger *log.Logger
-	id PeerIdentity
+	logger        *log.Logger
 }
 
-func (ic * IncomingPeerConnection) loop(err chan<- error) {
-	defer onLoopExit(err)
+func (ic *IncomingPeerConnection) loop(err chan<- PeerError, id *PeerIdentity) {
+	defer onLoopExit(err, id)
 	var keepAlive = time.After(KEEP_ALIVE_PERIOD)
 	for {
 		c, next := ic.maybeEnableSend()
 		select {
-		case <- ic.close: break
-		case <- keepAlive:
-			err <- errKeepAliveExpired
+		case <-ic.close:
 			break
-		case c <- next: ic.pending = ic.pending[1:]
+		case <-keepAlive:
+			panic(errKeepAliveExpired)
+		case c <- next:
+			ic.pending = ic.pending[1:]
 		default:
 			if n := ic.readOrSleepFor(ONE_SECOND); n > 0 {
 				keepAlive = time.After(KEEP_ALIVE_PERIOD)
+				ic.maybeReadMessage(id)
 			}
 		}
 	}
 	ic.logger.Println("Loop exit")
 }
 
-func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (int) {
+func (ic *IncomingPeerConnection) readOrSleepFor(d time.Duration) int {
 	if len(ic.pending) >= MAX_INCOMING_BUFFER {
 		ic.logger.Println("Incoming buffer full - sleeping...")
-		time.Sleep(d)	// too many outstanding messages
+		time.Sleep(d) // too many outstanding messages
 		return 0
 	}
 
@@ -218,11 +239,10 @@ func (ic * IncomingPeerConnection) readOrSleepFor(d time.Duration) (int) {
 	ic.conn.SetReadDeadline(time.Now().Add(d))
 	buf, n := read(ic.conn)
 	ic.buffer = append(ic.buffer, buf...)
-	ic.maybeReadMessage()
 	return n
 }
 
-func (ic * IncomingPeerConnection) maybeEnableSend() (chan<- *ProtocolMessageWithId, *ProtocolMessageWithId) {
+func (ic *IncomingPeerConnection) maybeEnableSend() (chan<- *ProtocolMessageWithId, *ProtocolMessageWithId) {
 	var c chan<- *ProtocolMessageWithId
 	var next *ProtocolMessageWithId
 	if len(ic.pending) > 0 {
@@ -232,15 +252,15 @@ func (ic * IncomingPeerConnection) maybeEnableSend() (chan<- *ProtocolMessageWit
 	return c, next
 }
 
-func (ic * IncomingPeerConnection) maybeReadMessage() {
+func (ic *IncomingPeerConnection) maybeReadMessage(id *PeerIdentity) {
 	var msg *ProtocolMessageWithId
 	if !ic.readHandshake {
-		ic.buffer, msg = ReadHandshake(ic.buffer, ic.id)
+		ic.buffer, msg = ReadHandshake(ic.buffer, id)
 		if msg != nil {
 			ic.readHandshake = true
 		}
 	} else {
-		ic.buffer, msg = UnmarshalWithId(ic.buffer, ic.id)
+		ic.buffer, msg = UnmarshalWithId(ic.buffer, id)
 	}
 
 	if msg != nil {
@@ -258,22 +278,25 @@ func (ic * IncomingPeerConnection) maybeReadMessage() {
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type OutgoingPeerConnection struct {
-	close <-chan struct{}
-	c <-chan ProtocolMessage
-	conn net.Conn
-	curr []byte
+	close  <-chan struct{}
+	c      <-chan ProtocolMessage
+	conn   net.Conn
+	curr   []byte
 	logger *log.Logger
 }
 
-func (oc * OutgoingPeerConnection) loop(err chan<- error) {
-	defer onLoopExit(err)
+func (oc *OutgoingPeerConnection) loop(err chan<- PeerError, id *PeerIdentity) {
+	defer onLoopExit(err, id)
 	var keepAlive = time.After(KEEP_ALIVE_PERIOD)
 	for {
 		c := oc.maybeEnableReceive()
 		select {
-		case <- oc.close: break
-		case <- keepAlive: oc.append(KeepAliveMessage)
-		case msg := <- c: oc.append(msg)
+		case <-oc.close:
+			break
+		case <-keepAlive:
+			oc.append(KeepAliveMessage)
+		case msg := <-c:
+			oc.append(msg)
 		default:
 			if n := oc.writeOrReceiveFor(FIVE_HUNDRED_MILLIS); n > 0 {
 				keepAlive = time.After(KEEP_ALIVE_PERIOD)
@@ -283,7 +306,7 @@ func (oc * OutgoingPeerConnection) loop(err chan<- error) {
 	oc.logger.Println("Loop exit")
 }
 
-func (oc * OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
+func (oc *OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
 	var c <-chan ProtocolMessage
 	if len(oc.curr) == 0 {
 		c = oc.c
@@ -291,19 +314,20 @@ func (oc * OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
 	return c
 }
 
-func (oc * OutgoingPeerConnection) append(msg ProtocolMessage) {
+func (oc *OutgoingPeerConnection) append(msg ProtocolMessage) {
 	oc.logger.Print(msg)
 	oc.curr = append(oc.curr, Marshal(msg)...)
 }
 
-func (oc * OutgoingPeerConnection) writeOrReceiveFor(d time.Duration) (bytes int) {
+func (oc *OutgoingPeerConnection) writeOrReceiveFor(d time.Duration) (bytes int) {
 
 	if len(oc.curr) == 0 {
 
 		// Receive until timeout
 		select {
-		case msg := <- oc.c: oc.curr = Marshal(msg)
-		case <- time.After(d):
+		case msg := <-oc.c:
+			oc.curr = Marshal(msg)
+		case <-time.After(d):
 		}
 	} else {
 
@@ -319,12 +343,12 @@ func (oc * OutgoingPeerConnection) writeOrReceiveFor(d time.Duration) (bytes int
 	return bytes
 }
 
-func onLoopExit(c chan<- error) {
+func onLoopExit(c chan<- PeerError, id *PeerIdentity) {
 	if r := recover(); r != nil {
 		if _, ok := r.(runtime.Error); ok {
 			panic(r)
 		}
-		c <- r.(error)
+		c <- PeerError{err: r.(error), id: id}
 	}
 }
 
@@ -351,7 +375,7 @@ func read(r io.Reader) ([]byte, int) {
 
 // Panic if the error is not a timeout
 func panicIfNotTimeout(err error) {
-	if opErr, ok := err.(*net.OpError); (ok && !opErr.Timeout() || !ok) {
+	if opErr, ok := err.(*net.OpError); ok && !opErr.Timeout() || !ok {
 		panic(err)
 	}
 }

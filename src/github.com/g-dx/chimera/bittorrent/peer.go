@@ -8,10 +8,9 @@ import (
 
 const (
 	ReceiveBufferSize = 25
-	RequestQueueSize = 25
-	ThirtySeconds = 30 * time.Second
+	RequestQueueSize  = 25
+	ThirtySeconds     = 30 * time.Second
 )
-
 
 // ----------------------------------------------------------------------------------
 // Peer State - key protocol state
@@ -23,12 +22,12 @@ type PeerState struct {
 }
 
 func NewPeerState(bits *BitSet) PeerState {
-	return PeerState {
-		remoteChoke : true,
-		localChoke : true,
-		remoteInterest : false,
-		localInterest : false,
-		bitfield : bits,
+	return PeerState{
+		remoteChoke:    true,
+		localChoke:     true,
+		remoteInterest: false,
+		localInterest:  false,
+		bitfield:       bits,
 	}
 }
 
@@ -38,15 +37,9 @@ func NewPeerState(bits *BitSet) PeerState {
 
 type Peer struct {
 
-	// Message buffer & message sinks
-	inBuf * RingBuffer
-
 	// Request queues & sinks
-	remoteQ, localQ * MessageQueue
-	remoteSink, localSink * MessageSink
-
-	// Connection error channels
-	err <-chan error
+	remoteQ, localQ       *MessageQueue
+	remoteSink, localSink *MessageSink
 
 	// State of peer
 	state PeerState
@@ -55,122 +48,90 @@ type Peer struct {
 	pieceMap *PieceMap
 
 	// ID
-	id PeerIdentity
+	id *PeerIdentity
 
 	// Peer statistics concerning upload, download, etc...
-	statistics * Statistics
+	statistics *Statistics
 
-	logger * log.Logger
-
-	// Cleanup function called on close
-	onCloseFn func(error)
+	logger *log.Logger
 }
 
-func NewPeer(id PeerIdentity,
-		     out chan<- ProtocolMessage,
-			 disk chan<- DiskMessage,
-			 mi * MetaInfo,
-	         pieceMap * PieceMap,
-			 e <-chan error,
-			 logger * log.Logger,
-			 onCloseFn func(error)) *Peer {
+func NewPeer(id *PeerIdentity,
+	out chan<- ProtocolMessage,
+	mi *MetaInfo,
+	pieceMap *PieceMap,
+	logger *log.Logger) *Peer {
 
-	return &Peer {
-		inBuf      : NewRingBuffer(ReceiveBufferSize),
+	return &Peer{
 
-		remoteQ    : NewMessageQueue(RequestQueueSize),
-		remoteSink : NewRemoteMessageSink(id, out, disk),
-		localQ     : NewMessageQueue(RequestQueueSize),
-		localSink  : NewLocalMessageSink(id, out, disk),
-
-		id         : id,
-		pieceMap   : pieceMap,
-		state      : NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
-
-		logger : logger,
-		err : e,
-
-		statistics : &Statistics{},
-		onCloseFn : onCloseFn,
+		remoteQ:    NewMessageQueue(RequestQueueSize),
+		remoteSink: NewRemoteMessageSink(id, out, nil),
+		localQ:     NewMessageQueue(RequestQueueSize),
+		localSink:  NewLocalMessageSink(id, out, nil),
+		id:       id,
+		pieceMap: pieceMap,
+		state:    NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
+		logger: logger,
+		statistics: &Statistics{},
 	}
 }
 
-func (p * Peer) Id() PeerIdentity {
+func (p *Peer) Id() *PeerIdentity {
 	return p.id
 }
 
-func (p * Peer) ProcessMessages() int {
-
-	// Number of operations we performed
-	n := 0
-
-	// Check for errors
-	select {
-	case err := <- p.err:
-		p.Close(err)
-		return 0
-	default:
-	}
-
-	// Return expired requests to map
-	p.pieceMap.ReturnBlocks(p.localQ.ClearExpired(ThirtySeconds))
-
-	// Drain local & remote traffic to appropriate destinations
-	remoteW := true
-	localW := true
-	for remoteW || localW {
-		if localW {
-			localW = p.localQ.Write(p.localSink)
-			n++
-		}
-		if remoteW {
-			remoteW = p.remoteQ.Write(p.remoteSink)
-			n++
-		}
-	}
-
-	return n
-}
-
-func (p * Peer) HandleMessage(pm ProtocolMessage) {
+func (p *Peer) OnMessage(pm ProtocolMessage) error {
 	p.logger.Printf("%v, Handling Msg: %v\n", p.id, pm)
 	switch msg := pm.(type) {
-	case *ChokeMessage: p.Choke()
-	case *UnchokeMessage: p.Unchoke()
-	case *InterestedMessage: p.Interested()
-	case *UninterestedMessage: p.Uninterested()
-	case *BitfieldMessage: p.Bitfield(msg.Bits())
-	case *HaveMessage: p.Have(msg.Index())
-	case *CancelMessage: p.Cancel(msg.Index(), msg.Begin(), msg.Length())
-	case *RequestMessage: p.Request(msg.Index(), msg.Begin(), msg.Length())
-	case *BlockMessage: p.Block(msg.Index(), msg.Begin(), msg.Block())
+	case *ChokeMessage:
+		return p.onChoke()
+	case *UnchokeMessage:
+		return p.onUnchoke()
+	case *InterestedMessage:
+		return p.onInterested()
+	case *UninterestedMessage:
+		return p.onUninterested()
+	case *BitfieldMessage:
+		return p.onBitfield(msg.Bits())
+	case *HaveMessage:
+		return p.onHave(msg.Index())
+	case *CancelMessage:
+		return p.onCancel(msg.Index(), msg.Begin(), msg.Length())
+	case *RequestMessage:
+		return p.onRequest(msg.Index(), msg.Begin(), msg.Length())
+	case *BlockMessage:
+		return p.onBlock(msg.Index(), msg.Begin(), msg.Block())
 	default:
-		panic(fmt.Sprintf("Unknown protocol message: %v", pm))
+		return newError(fmt.Sprintf("Unknown protocol message: %v", pm))
 	}
 }
 
-func (p * Peer) Choke() {
+func (p *Peer) onChoke() error {
 	p.pieceMap.ReturnBlocks(p.localQ.ClearNew())
 	p.state.localChoke = true
+	return nil
 }
 
-func (p * Peer) Unchoke() {
+func (p *Peer) onUnchoke() error {
 	p.state.localChoke = false
+	return nil
 }
 
-func (p * Peer) Interested() {
+func (p *Peer) onInterested() error {
 	p.state.remoteInterest = !p.state.bitfield.IsComplete()
+	return nil
 }
 
-func (p * Peer) Uninterested() {
+func (p *Peer) onUninterested() error {
 	p.state.remoteInterest = false
+	return nil
 }
 
-func (p * Peer) Have(index uint32) {
+func (p *Peer) onHave(index uint32) error {
 
 	// Validate
 	if !p.state.bitfield.IsValid(index) {
-		p.Close(newError("Invalid index received: %v", index))
+		return newError("Invalid index received: %v", index)
 	}
 
 	if !p.state.bitfield.Have(index) {
@@ -184,38 +145,42 @@ func (p * Peer) Have(index uint32) {
 			p.localQ.Add(Interested)
 		}
 	}
+	return nil
 }
 
-func (p * Peer) Cancel(index, begin, length uint32) {
+func (p *Peer) onCancel(index, begin, length uint32) error {
 	p.remoteQ.Remove(index, begin, length)
+	return nil
 }
 
-func (p * Peer) Request(index, begin, length uint32) {
+func (p *Peer) onRequest(index, begin, length uint32) error {
 	if !p.pieceMap.IsValid(index, begin, length) {
-		p.Close(newError("Invalid request received: %v, %v, %v", index, begin, length))
+		return newError("Invalid request received: %v, %v, %v", index, begin, length)
 	}
 
 	if !p.state.remoteChoke {
 		p.remoteQ.Add(Request(index, begin, length))
 	}
+	return nil
 }
 
-func (p * Peer) Block(index, begin uint32, block []byte) {
+func (p *Peer) onBlock(index, begin uint32, block []byte) error {
 	if !p.pieceMap.IsValid(index, begin, uint32(len(block))) {
-		p.Close(newError("Invalid block received: %v, %v, %v", index, begin, block))
+		return newError("Invalid block received: %v, %v, %v", index, begin, block)
 	}
 
 	p.localQ.Add(Block(index, begin, block))
 	p.Statistics().Downloaded(uint(len(block)))
+	return nil
 }
 
-func (p * Peer) Bitfield(bits []byte) {
+func (p *Peer) onBitfield(bits []byte) error {
 
 	// Create & validate bitfield
 	var err error
 	p.state.bitfield, err = NewBitSetFrom(bits, p.state.bitfield.Size())
 	if err != nil {
-		p.Close(err)
+		return err
 	}
 
 	// Update availability in global piece map
@@ -229,17 +194,18 @@ func (p * Peer) Bitfield(bits []byte) {
 			break
 		}
 	}
+	return nil
 }
 
 func (p Peer) Statistics() *Statistics {
 	return p.statistics
 }
 
-func (p * Peer) isNowInteresting(index uint32) bool {
+func (p *Peer) isNowInteresting(index uint32) bool {
 	return !p.state.localInterest && p.pieceMap.Piece(index).BlocksNeeded()
 }
 
-func (p * Peer) Close(err error) {
+func (p *Peer) Close() {
 
 	// Update availability & return all blocks
 	p.pieceMap.DecAll(p.state.bitfield)
@@ -247,16 +213,14 @@ func (p * Peer) Close(err error) {
 
 	// ...
 
-	// Invoke on close
-	p.onCloseFn(err)
 	fmt.Printf("Peer (%v) closed.\n", p.id)
 }
 
-func (p * Peer) BlocksRequired() uint {
+func (p *Peer) BlocksRequired() uint {
 	return uint(p.localQ.Capacity() - p.localQ.Size())
 }
 
-func (p * Peer) BlockWritten(index, begin uint32) {
+func (p *Peer) BlockWritten(index, begin uint32) {
 	// Update piece and check if finished
 	piece := p.pieceMap.Piece(index)
 	piece.BlockDone(begin)
@@ -268,7 +232,7 @@ func (p * Peer) BlockWritten(index, begin uint32) {
 	}
 }
 
-func (p * Peer) CanDownload() bool {
+func (p *Peer) CanDownload() bool {
 	return !p.state.localChoke && p.state.localInterest && !p.localQ.IsFull()
 }
 
@@ -277,16 +241,16 @@ func (p * Peer) CanDownload() bool {
 // ----------------------------------------------------------------------------------
 
 type Statistics struct {
-	totalBytesDownloaded uint64
+	totalBytesDownloaded     uint64
 	bytesDownloadedPerUpdate uint
-	bytesDownloaded uint
+	bytesDownloaded          uint
 
-	totalBytesWritten uint64
+	totalBytesWritten     uint64
 	bytesWrittenPerUpdate uint
-	bytesWritten uint
+	bytesWritten          uint
 }
 
-func (s * Statistics) Update() {
+func (s *Statistics) Update() {
 
 	// Update & reset
 	s.bytesDownloadedPerUpdate = s.bytesDownloaded
@@ -295,10 +259,10 @@ func (s * Statistics) Update() {
 	s.bytesWritten = 0
 }
 
-func (s * Statistics) Downloaded(n uint) {
+func (s *Statistics) Downloaded(n uint) {
 	s.bytesDownloaded += n
 }
 
-func (s * Statistics) Written(n uint) {
+func (s *Statistics) Written(n uint) {
 	s.bytesWritten += n
 }

@@ -1,9 +1,9 @@
 package bittorrent
 
 import (
+	"io"
 	"log"
 	"os"
-	"io"
 )
 
 const (
@@ -11,86 +11,86 @@ const (
 )
 
 type DiskMessage interface {
-	Id() PeerIdentity
+	Id() *PeerIdentity
 }
 
 type DiskWriteMessage struct {
-	id PeerIdentity
+	id           *PeerIdentity
 	index, begin uint32
-	block []byte
+	block        []byte
 }
 
-func (dw DiskWriteMessage) Id() PeerIdentity {
+func (dw DiskWriteMessage) Id() *PeerIdentity {
 	return dw.id
 }
 
-func DiskWrite(b *BlockMessage, id PeerIdentity) *DiskWriteMessage {
-	return &DiskWriteMessage {
-		id : id,
-		index : b.Index(),
-		begin : b.Begin(),
-		block : b.Block(),
+func DiskWrite(b *BlockMessage, id *PeerIdentity) *DiskWriteMessage {
+	return &DiskWriteMessage{
+		id:    id,
+		index: b.Index(),
+		begin: b.Begin(),
+		block: b.Block(),
 	}
 }
 
 type DiskReadMessage struct {
-	id PeerIdentity
+	id                   *PeerIdentity
 	index, begin, length uint32
 }
 
-func (dm DiskReadMessage) Id() PeerIdentity {
+func (dm DiskReadMessage) Id() *PeerIdentity {
 	return dm.id
 }
 
-func DiskRead(r *RequestMessage, id PeerIdentity) *DiskReadMessage {
-	return &DiskReadMessage {
-		id : id,
-		index : r.Index(),
-		begin : r.Begin(),
-		length : r.Length(),
+func DiskRead(r *RequestMessage, id *PeerIdentity) *DiskReadMessage {
+	return &DiskReadMessage{
+		id:     id,
+		index:  r.Index(),
+		begin:  r.Begin(),
+		length: r.Length(),
 	}
 }
 
 type DiskMessageResult interface {
-	Id() PeerIdentity
+	Id() *PeerIdentity
 }
 
 type DiskReadResult struct {
-	id PeerIdentity
-	b *BlockMessage
+	id *PeerIdentity
+	b  *BlockMessage
 }
 
-func (drr DiskReadResult) Id() PeerIdentity {
+func (drr DiskReadResult) Id() *PeerIdentity {
 	return drr.id
 }
 
 type DiskWriteResult struct {
-	id PeerIdentity
+	id                   *PeerIdentity
 	index, begin, length uint32
 }
 
-func (dwr DiskWriteResult) Id() PeerIdentity {
+func (dwr DiskWriteResult) Id() *PeerIdentity {
 	return dwr.id
 }
 
 func mockDisk(reader <-chan DiskMessage, logger *log.Logger) {
 	for {
 		select {
-		case r := <- reader:
+		case r := <-reader:
 			logger.Printf("Disk Read: %v\n", r)
-//		case w := <- writer:
-//			logger.Printf("Disk Write: %v\n", w)
+			//		case w := <- writer:
+			//			logger.Printf("Disk Write: %v\n", w)
 		}
 	}
 }
 
 type DiskAccess struct {
 	files []*os.File
-	lens []uint64
-	mi *MetaInfo
-	in <-chan DiskMessage
-	out chan<- DiskMessageResult
-	log *log.Logger
+	lens  []uint64
+	mi    *MetaInfo
+	in    <-chan DiskMessage
+	out   chan<- DiskMessageResult
+	log   *log.Logger
 }
 
 func NewDiskAccess(mi *MetaInfo,
@@ -107,12 +107,12 @@ func NewDiskAccess(mi *MetaInfo,
 
 	// Create & start
 	da := &DiskAccess{
-		files : files,
-		lens  : lens,
-		mi : mi,
-		in : in,
-		out : out,
-		log : log,
+		files: files,
+		lens:  lens,
+		mi:    mi,
+		in:    in,
+		out:   out,
+		log:   log,
 	}
 	go da.loop()
 	return da, nil
@@ -143,7 +143,7 @@ func initialise(mif []MetaInfoFile, dir string) ([]*os.File, []uint64, error) {
 		} else {
 
 			// Create all dirs
-			err = os.MkdirAll(fileDir, os.ModeDir | os.ModePerm)
+			err = os.MkdirAll(fileDir, os.ModeDir|os.ModePerm)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -171,11 +171,11 @@ func initialise(mif []MetaInfoFile, dir string) ([]*os.File, []uint64, error) {
 }
 
 func (da DiskAccess) loop() {
-//	defer da.onExit
+	//	defer da.onExit
 
 	for {
 		select {
-		case ioOp := <- da.in:
+		case ioOp := <-da.in:
 
 			var res DiskMessageResult
 			var err error
@@ -204,7 +204,7 @@ func (da DiskAccess) onReadMessage(drm *DiskReadMessage) (DiskMessageResult, err
 	if err != nil {
 		return nil, err
 	}
-	return &DiskReadResult{ drm.Id(), Block(drm.index, drm.begin, buf) }, nil
+	return &DiskReadResult{drm.Id(), Block(drm.index, drm.begin, buf)}, nil
 }
 
 func (da DiskAccess) onWriteMessage(drm *DiskWriteMessage) (DiskMessageResult, error) {
@@ -212,7 +212,7 @@ func (da DiskAccess) onWriteMessage(drm *DiskWriteMessage) (DiskMessageResult, e
 	if err != nil {
 		return nil, err
 	}
-	return &DiskWriteResult{drm.Id(), drm.index, drm.begin, uint32(len(drm.block)) }, nil
+	return &DiskWriteResult{drm.Id(), drm.index, drm.begin, uint32(len(drm.block))}, nil
 }
 
 func (da DiskAccess) onIO(buf []byte,

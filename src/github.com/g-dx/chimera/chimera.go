@@ -86,6 +86,10 @@ func main() {
 
 	//	fmt.Printf("No of CPUs: %v\n", runtime.NumCPU())
 
+	// Start fake disk reader
+	//	diskR := make(chan DiskMessage)
+	//	go mockDisk(diskR, logger)
+
 	dIn := make(chan bittorrent.DiskMessage)
 	dOut := make(chan bittorrent.DiskMessageResult)
 	_, err = bittorrent.NewDiskAccess(metaInfo, dIn, dOut, dir, nil)

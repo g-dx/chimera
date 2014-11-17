@@ -7,53 +7,60 @@ import "time"
 // ----------------------------------------------------------------------------------
 
 type MessageSink struct {
-	id PeerIdentity
+	id   *PeerIdentity
 	conn chan<- ProtocolMessage
 	disk chan<- DiskMessage
-	w func(ProtocolMessage) bool // Decides which channel to write to
+	w    func(ProtocolMessage) bool // Decides which channel to write to
 }
 
 func (ms MessageSink) Write(msg ProtocolMessage) bool {
 	return ms.w(msg)
 }
 
-
 func (ms MessageSink) ToConnection(msg ProtocolMessage) bool {
 	select {
-	case ms.conn <- msg : return true
-	default: return false
+	case ms.conn <- msg:
+		return true
+	default:
+		return false
 	}
 }
 
 func (ms MessageSink) ToDisk(msg DiskMessage) bool {
 	select {
-	case ms.disk <- msg : return true
-	default: return false
+	case ms.disk <- msg:
+		return true
+	default:
+		return false
 	}
 }
 
-func NewRemoteMessageSink(id PeerIdentity,
-	                      conn chan<- ProtocolMessage,
-						  disk chan<- DiskMessage) *MessageSink {
+func NewRemoteMessageSink(id *PeerIdentity,
+	conn chan<- ProtocolMessage,
+	disk chan<- DiskMessage) *MessageSink {
 
-	ms := &MessageSink { id : id, conn : conn, disk : disk, }
-	ms.w = func (m ProtocolMessage) bool {
+	ms := &MessageSink{id: id, conn: conn, disk: disk}
+	ms.w = func(m ProtocolMessage) bool {
 		switch msg := m.(type) {
-		case *RequestMessage: return ms.ToDisk(DiskRead(msg, id))
-		default: return ms.ToConnection(msg)
+		case *RequestMessage:
+			return ms.ToDisk(DiskRead(msg, id))
+		default:
+			return ms.ToConnection(msg)
 		}
 	}
 	return ms
 }
 
-func NewLocalMessageSink(id PeerIdentity,
-						 conn chan<- ProtocolMessage,
-						 disk chan<- DiskMessage) *MessageSink {
-	ms := &MessageSink { id : id, conn : conn, disk : disk, }
-	ms.w = func (m ProtocolMessage) bool {
+func NewLocalMessageSink(id *PeerIdentity,
+	conn chan<- ProtocolMessage,
+	disk chan<- DiskMessage) *MessageSink {
+	ms := &MessageSink{id: id, conn: conn, disk: disk}
+	ms.w = func(m ProtocolMessage) bool {
 		switch msg := m.(type) {
-		case *BlockMessage: return ms.ToDisk(DiskWrite(msg, id))
-		default: return ms.ToConnection(msg)
+		case *BlockMessage:
+			return ms.ToDisk(DiskWrite(msg, id))
+		default:
+			return ms.ToConnection(msg)
 		}
 	}
 	return ms
@@ -70,18 +77,18 @@ const (
 )
 
 type BlockRequestStatus struct {
-	state    int
-	req      *RequestMessage
-	block    *BlockMessage
-	start    time.Time
+	state int
+	req   *RequestMessage
+	block *BlockMessage
+	start time.Time
 }
 
 func NewBlockRequestStatus(req *RequestMessage) *BlockRequestStatus {
-	return &BlockRequestStatus {
-		state : new,
-		req : req,
-		block : nil,
-		start : time.Now(),
+	return &BlockRequestStatus{
+		state: new,
+		req:   req,
+		block: nil,
+		start: time.Now(),
 	}
 }
 
@@ -94,43 +101,43 @@ func NewBlockRequestStatus(req *RequestMessage) *BlockRequestStatus {
 
 type MessageQueue struct {
 	reqs  []*BlockRequestStatus
-	other [] ProtocolMessage
+	other []ProtocolMessage
 	cap   int
 }
 
 func NewMessageQueue(cap int) *MessageQueue {
-	return &MessageQueue {
-		reqs     : make([]*BlockRequestStatus, 0, cap),
-		other    : make([] ProtocolMessage, 0, cap),
-		cap      : cap,
+	return &MessageQueue{
+		reqs:  make([]*BlockRequestStatus, 0, cap),
+		other: make([]ProtocolMessage, 0, cap),
+		cap:   cap,
 	}
 }
 
-func (mq * MessageQueue) ClearNew() []*RequestMessage {
+func (mq *MessageQueue) ClearNew() []*RequestMessage {
 	return mq.Clear(func(brt *BlockRequestStatus) bool {
 		return brt.state == new
 	})
 }
 
-func (mq * MessageQueue) ClearExpired(t time.Duration) []*RequestMessage {
-	return mq.Clear(func(brt * BlockRequestStatus) bool {
+func (mq *MessageQueue) ClearExpired(t time.Duration) []*RequestMessage {
+	return mq.Clear(func(brt *BlockRequestStatus) bool {
 		return (brt.state == new || brt.state == pending) && brt.start.Add(t).After(time.Now())
 	})
 }
 
-func (mq * MessageQueue) ClearAll() []*RequestMessage {
-	return mq.Clear(func(_ * BlockRequestStatus) bool { return true })
+func (mq *MessageQueue) ClearAll() []*RequestMessage {
+	return mq.Clear(func(_ *BlockRequestStatus) bool { return true })
 }
 
-func (mq * MessageQueue) Remove(index, begin, length uint32) {
-	mq.Clear(func(brt * BlockRequestStatus) bool {
+func (mq *MessageQueue) Remove(index, begin, length uint32) {
+	mq.Clear(func(brt *BlockRequestStatus) bool {
 		return brt.req.Index() == index &&
-			   brt.req.Begin() == begin &&
-			   brt.req.Length() == length
+			brt.req.Begin() == begin &&
+			brt.req.Length() == length
 	})
 }
 
-func (mq * MessageQueue) Clear(p func(*BlockRequestStatus) bool) []*RequestMessage {
+func (mq *MessageQueue) Clear(p func(*BlockRequestStatus) bool) []*RequestMessage {
 
 	// Collect all cleared requests
 	reqs := make([]*RequestMessage, 0, mq.cap)
@@ -144,28 +151,28 @@ func (mq * MessageQueue) Clear(p func(*BlockRequestStatus) bool) []*RequestMessa
 	return reqs
 }
 
-func (mq * MessageQueue) IsFull() bool {
+func (mq *MessageQueue) IsFull() bool {
 	return mq.Size() < mq.cap
 }
 
-func (mq * MessageQueue) Size() int {
+func (mq *MessageQueue) Size() int {
 	return len(mq.reqs)
 }
 
-func (mq * MessageQueue) Capacity() int {
+func (mq *MessageQueue) Capacity() int {
 	return mq.cap
 }
 
-func (mq * MessageQueue) Add(m ProtocolMessage) {
+func (mq *MessageQueue) Add(m ProtocolMessage) {
 	switch msg := m.(type) {
 	case *BlockMessage:
 
 		// Check we have pending request for this block, otherwise skip
 		for i, req := range mq.reqs {
 			if req.req.Index() == msg.Index() &&
-			   req.req.Begin() == msg.Begin() &&
-			   req.req.Length() == uint32(len(msg.Block())) &&
-			   req.state == pending {
+				req.req.Begin() == msg.Begin() &&
+				req.req.Length() == uint32(len(msg.Block())) &&
+				req.state == pending {
 
 				mq.reqs[i].block = msg
 				break
@@ -174,12 +181,14 @@ func (mq * MessageQueue) Add(m ProtocolMessage) {
 
 		// NOTE: Could add logic to check if we ever requested this
 
-	case *RequestMessage: mq.reqs = append(mq.reqs, NewBlockRequestStatus(msg))
-	default: mq.other = append(mq.other, msg)
+	case *RequestMessage:
+		mq.reqs = append(mq.reqs, NewBlockRequestStatus(msg))
+	default:
+		mq.other = append(mq.other, msg)
 	}
 }
 
-func (mq * MessageQueue) Write(sink *MessageSink) bool {
+func (mq *MessageQueue) Write(sink *MessageSink) bool {
 
 	// I/O flags
 	var request, block, other bool
@@ -207,14 +216,14 @@ func (mq * MessageQueue) Write(sink *MessageSink) bool {
 
 	// 3. Send general protocol traffic
 	if len(mq.other) > 0 {
-		 other = mq.WriteMessage(mq.other[0], sink)
+		other = mq.WriteMessage(mq.other[0], sink)
 	}
 
 	// Did we perform some I/O?
 	return request || block || other
 }
 
-func (mq * MessageQueue) WriteBlock(i int, brs *BlockRequestStatus, sink *MessageSink) bool {
+func (mq *MessageQueue) WriteBlock(i int, brs *BlockRequestStatus, sink *MessageSink) bool {
 	ok := sink.Write(brs.block)
 	if ok {
 		mq.reqs = append(mq.reqs[:i], mq.reqs[i+1:]...) // Remove
@@ -222,7 +231,7 @@ func (mq * MessageQueue) WriteBlock(i int, brs *BlockRequestStatus, sink *Messag
 	return ok
 }
 
-func (mq * MessageQueue) WriteRequest(brs *BlockRequestStatus, sink *MessageSink) bool {
+func (mq *MessageQueue) WriteRequest(brs *BlockRequestStatus, sink *MessageSink) bool {
 	ok := sink.Write(brs.req)
 	if ok {
 		brs.state = pending
@@ -230,8 +239,7 @@ func (mq * MessageQueue) WriteRequest(brs *BlockRequestStatus, sink *MessageSink
 	return ok
 }
 
-
-func (mq * MessageQueue) WriteMessage(msg ProtocolMessage, sink *MessageSink) bool {
+func (mq *MessageQueue) WriteMessage(msg ProtocolMessage, sink *MessageSink) bool {
 	ok := sink.Write(msg)
 	if ok {
 		mq.other = mq.other[1:]

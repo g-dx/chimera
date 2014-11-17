@@ -1,12 +1,12 @@
 package bittorrent
 
 import (
-	"encoding/binary"
-	"io"
-	"fmt"
-	"errors"
-	"crypto/rand"
 	"bytes"
+	"crypto/rand"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 )
 
 const (
@@ -24,14 +24,14 @@ const (
 
 const (
 	// Fixed message lengths
-	chokeLength uint32        = 1
-	unchokeLength uint32      = 1
-	interestedLength uint32   = 1
+	chokeLength        uint32 = 1
+	unchokeLength      uint32 = 1
+	interestedLength   uint32 = 1
 	uninterestedLength uint32 = 1
-	haveLength uint32         = 5
-	cancelLength uint32       = 13
-	requestLength uint32      = 13
-	handshakeLength uint32    = 68
+	haveLength         uint32 = 5
+	cancelLength       uint32 = 13
+	requestLength      uint32 = 13
+	handshakeLength    uint32 = 68
 )
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -39,11 +39,11 @@ const (
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type ProtocolMessageWithId struct {
-	msg ProtocolMessage
-	peerid PeerIdentity
+	msg    ProtocolMessage
+	peerid *PeerIdentity
 }
 
-func (m ProtocolMessageWithId) PeerId() PeerIdentity {
+func (m ProtocolMessageWithId) PeerId() *PeerIdentity {
 	return m.peerid
 }
 
@@ -59,7 +59,7 @@ type ProtocolMessage interface {
 
 type msg struct {
 	len uint32
-	id byte
+	id  byte
 }
 
 func (m msg) Id() byte {
@@ -71,7 +71,7 @@ func (m msg) Len() uint32 {
 }
 
 func (m msg) String() string {
-	return "KeepAlive"  // TODO: again this isn't great!
+	return "KeepAlive" // TODO: again this isn't great!
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -79,6 +79,7 @@ func (m msg) String() string {
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 const protocolName = "BitTorrent protocol"
+
 var PeerId []byte
 
 func init() {
@@ -95,7 +96,7 @@ type HandshakeMessage struct {
 	protocol string
 	reserved [8]byte
 	infoHash []byte
-	peerId string
+	peerId   string
 }
 
 func (m HandshakeMessage) String() string {
@@ -105,9 +106,9 @@ func (m HandshakeMessage) String() string {
 // Incoming handshake
 func handshake(infoHash []byte, peerId []byte) *HandshakeMessage {
 	return &HandshakeMessage{
-		msg { uint32(handshakeLength-4), 0}, // What a hack!...(sigh)
+		msg{uint32(handshakeLength - 4), 0}, // What a hack!...(sigh)
 		protocolName,
-		[8]byte {},
+		[8]byte{},
 		infoHash,
 		string(peerId),
 	}
@@ -127,7 +128,7 @@ func Handshake(infoHash []byte) *HandshakeMessage {
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 // TODO: This isn't great!
-var KeepAliveMessage = &msg { 0, 0 }
+var KeepAliveMessage = &msg{0, 0}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Choke        <len=0001><id=0>
@@ -169,10 +170,10 @@ func (m UninterestedMessage) String() string {
 }
 
 var (
-	Choke = &ChokeMessage{ msg{ len : chokeLength, id : chokeId } }
-	Unchoke = &UnchokeMessage{ msg{ len : unchokeLength, id : unchokeId } }
-	Interested = &InterestedMessage{ msg{ len : interestedLength, id : interestedId } }
-	Uninterested = &UninterestedMessage{ msg{ len : uninterestedLength, id : uninterestedId } }
+	Choke        = &ChokeMessage{msg{len: chokeLength, id: chokeId}}
+	Unchoke      = &UnchokeMessage{msg{len: unchokeLength, id: unchokeId}}
+	Interested   = &InterestedMessage{msg{len: interestedLength, id: interestedId}}
+	Uninterested = &UninterestedMessage{msg{len: uninterestedLength, id: uninterestedId}}
 )
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -193,7 +194,7 @@ func (m HaveMessage) String() string {
 }
 
 func Have(i uint32) *HaveMessage {
-	return &HaveMessage { msg { len : haveLength, id : haveId}, i }
+	return &HaveMessage{msg{len: haveLength, id: haveId}, i}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -214,7 +215,7 @@ func (m BitfieldMessage) String() string {
 }
 
 func Bitfield(bits []byte) *BitfieldMessage {
-	return &BitfieldMessage { msg { len : uint32(1+len(bits)), id : bitfieldId }, bits }
+	return &BitfieldMessage{msg{len: uint32(1 + len(bits)), id: bitfieldId}, bits}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -243,8 +244,8 @@ func (m RequestMessage) String() string {
 }
 
 func Request(index, begin, length uint32) *RequestMessage {
-	return &RequestMessage {
-		msg { len : requestLength, id : requestId },
+	return &RequestMessage{
+		msg{len: requestLength, id: requestId},
 		index,
 		begin,
 		length,
@@ -258,7 +259,7 @@ func Request(index, begin, length uint32) *RequestMessage {
 type BlockMessage struct {
 	msg
 	index, begin uint32
-	block []byte
+	block        []byte
 }
 
 func (m BlockMessage) Index() uint32 {
@@ -278,8 +279,8 @@ func (m BlockMessage) String() string {
 }
 
 func Block(index, begin uint32, block []byte) *BlockMessage {
-	return &BlockMessage {
-		msg { len : uint32(9+len(block)), id : blockId },
+	return &BlockMessage{
+		msg{len: uint32(9 + len(block)), id: blockId},
 		index,
 		begin,
 		block,
@@ -312,15 +313,15 @@ func (m CancelMessage) String() string {
 }
 
 func Cancel(index, begin, length uint32) *CancelMessage {
-	return &CancelMessage {
-		msg { len : cancelLength, id : cancelId },
+	return &CancelMessage{
+		msg{len: cancelLength, id: cancelId},
 		index,
 		begin,
 		length,
 	}
 }
 
-func ReadHandshake(buf []byte, id PeerIdentity) ([]byte, *ProtocolMessageWithId) {
+func ReadHandshake(buf []byte, id *PeerIdentity) ([]byte, *ProtocolMessageWithId) {
 
 	// Do we have enough data for handshake?
 	if len(buf) < int(handshakeLength) {
@@ -333,7 +334,7 @@ func ReadHandshake(buf []byte, id PeerIdentity) ([]byte, *ProtocolMessageWithId)
 
 	// TODO: Assert the protocol & reserved bytes?
 
-	return remainingBuf, &ProtocolMessageWithId{msg : handshake(data[28:48], data[48:handshakeLength]), peerid : id}
+	return remainingBuf, &ProtocolMessageWithId{msg: handshake(data[28:48], data[48:handshakeLength]), peerid: id}
 }
 
 func Marshal(pm ProtocolMessage) []byte {
@@ -372,9 +373,9 @@ func Marshal(pm ProtocolMessage) []byte {
 	return w.Bytes()
 }
 
-func UnmarshalWithId(buf []byte, id PeerIdentity) ([]byte, *ProtocolMessageWithId) {
+func UnmarshalWithId(buf []byte, id *PeerIdentity) ([]byte, *ProtocolMessageWithId) {
 	remaining, msg := Unmarshal(buf)
-	return remaining, &ProtocolMessageWithId { msg : msg, peerid : id }
+	return remaining, &ProtocolMessageWithId{msg: msg, peerid: id}
 }
 
 func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {
@@ -404,10 +405,14 @@ func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {
 	messageId := data[0]
 	data = data[1:]
 	switch messageId {
-	case chokeId: return remainingBuf, Choke
-	case unchokeId: return remainingBuf, Unchoke
-	case interestedId: return remainingBuf, Interested
-	case uninterestedId: return remainingBuf, Uninterested
+	case chokeId:
+		return remainingBuf, Choke
+	case unchokeId:
+		return remainingBuf, Unchoke
+	case interestedId:
+		return remainingBuf, Interested
+	case uninterestedId:
+		return remainingBuf, Uninterested
 	case haveId:
 		index := toUint32(data)
 		return remainingBuf, Have(index)
@@ -420,7 +425,7 @@ func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {
 		return remainingBuf, Request(index, begin, length)
 	case blockId:
 		index := toUint32(data[0:4])
-		begin:= toUint32(data[4:8])
+		begin := toUint32(data[4:8])
 		return remainingBuf, Block(index, begin, data[8:])
 	case cancelId:
 		index := toUint32(data[0:4])
@@ -438,7 +443,7 @@ func toUint32(bytes []byte) uint32 {
 	var a uint32
 	l := len(bytes)
 	for i, b := range bytes {
-		shift := uint32((l-i-1) * 8)
+		shift := uint32((l - i - 1) * 8)
 		a |= uint32(b) << shift
 	}
 	return a
