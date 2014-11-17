@@ -18,7 +18,7 @@ const (
 
 type PeerState struct {
 	remoteChoke, localChoke, remoteInterest, localInterest bool
-	bitfield *BitSet
+	bitfield                                               *BitSet
 }
 
 func NewPeerState(bits *BitSet) PeerState {
@@ -36,8 +36,7 @@ func NewPeerState(bits *BitSet) PeerState {
 // ----------------------------------------------------------------------------------
 
 type Peer struct {
-
-	queue PeerQueue
+	queue *PeerQueue
 
 	// State of peer
 	state PeerState
@@ -61,12 +60,12 @@ func NewPeer(id *PeerIdentity,
 	logger *log.Logger) *Peer {
 
 	return &Peer{
-		id:       id,
-		pieceMap: pieceMap,
-		state:    NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
-		logger: logger,
+		id:         id,
+		pieceMap:   pieceMap,
+		state:      NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
+		logger:     logger,
 		statistics: &Statistics{},
-		queue : queue,
+		queue:      queue,
 	}
 }
 
@@ -208,15 +207,15 @@ func (p *Peer) CanDownload() bool {
 	return !p.state.localChoke && p.state.localInterest
 }
 
-func (p * Peer) Choke() error {
+func (p *Peer) Choke() error {
 	return p.Add(Choke)
 }
 
-func (p * Peer) UnChoke() error {
+func (p *Peer) UnChoke() error {
 	return p.Add(Unchoke)
 }
 
-func (p * Peer) Add(pm ProtocolMessage) error {
+func (p *Peer) Add(pm ProtocolMessage) error {
 	return p.queue.Add(pm)
 }
 
