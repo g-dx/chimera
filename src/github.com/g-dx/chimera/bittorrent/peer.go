@@ -37,9 +37,7 @@ func NewPeerState(bits *BitSet) PeerState {
 
 type Peer struct {
 
-	// Request queues & sinks
-	remoteQ, localQ       *MessageQueue
-	remoteSink, localSink *MessageSink
+	queue PeerQueue
 
 	// State of peer
 	state PeerState
@@ -57,22 +55,18 @@ type Peer struct {
 }
 
 func NewPeer(id *PeerIdentity,
-	out chan<- ProtocolMessage,
+	queue *PeerQueue,
 	mi *MetaInfo,
 	pieceMap *PieceMap,
 	logger *log.Logger) *Peer {
 
 	return &Peer{
-
-		remoteQ:    NewMessageQueue(RequestQueueSize),
-		remoteSink: NewRemoteMessageSink(id, out, nil),
-		localQ:     NewMessageQueue(RequestQueueSize),
-		localSink:  NewLocalMessageSink(id, out, nil),
 		id:       id,
 		pieceMap: pieceMap,
 		state:    NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
 		logger: logger,
 		statistics: &Statistics{},
+		queue : queue,
 	}
 }
 
@@ -107,7 +101,7 @@ func (p *Peer) OnMessage(pm ProtocolMessage) error {
 }
 
 func (p *Peer) onChoke() error {
-	p.pieceMap.ReturnBlocks(p.localQ.ClearNew())
+	p.pieceMap.ReturnBlocks(p.queue.Choke())
 	p.state.localChoke = true
 	return nil
 }
@@ -142,34 +136,24 @@ func (p *Peer) onHave(index uint32) error {
 		p.pieceMap.Inc(index)
 
 		if p.isNowInteresting(index) {
-			p.localQ.Add(Interested)
+			p.queue.Add(Interested)
 		}
 	}
 	return nil
 }
 
 func (p *Peer) onCancel(index, begin, length uint32) error {
-	p.remoteQ.Remove(index, begin, length)
+	// NOTE: Handled lower down the stack...
 	return nil
 }
 
 func (p *Peer) onRequest(index, begin, length uint32) error {
-	if !p.pieceMap.IsValid(index, begin, length) {
-		return newError("Invalid request received: %v, %v, %v", index, begin, length)
-	}
-
-	if !p.state.remoteChoke {
-		p.remoteQ.Add(Request(index, begin, length))
-	}
+	// NOTE: Already on the way to disk...
 	return nil
 }
 
 func (p *Peer) onBlock(index, begin uint32, block []byte) error {
-	if !p.pieceMap.IsValid(index, begin, uint32(len(block))) {
-		return newError("Invalid block received: %v, %v, %v", index, begin, block)
-	}
-
-	p.localQ.Add(Block(index, begin, block))
+	// NOTE: Already on the way to disk...
 	p.Statistics().Downloaded(uint(len(block)))
 	return nil
 }
@@ -190,7 +174,7 @@ func (p *Peer) onBitfield(bits []byte) error {
 	for i := uint32(0); i < p.state.bitfield.Size(); i++ {
 		if p.pieceMap.Piece(i).BlocksNeeded() {
 			p.state.localInterest = true
-			p.localQ.Add(Interested)
+			p.queue.Add(Interested)
 			break
 		}
 	}
@@ -209,31 +193,31 @@ func (p *Peer) Close() {
 
 	// Update availability & return all blocks
 	p.pieceMap.DecAll(p.state.bitfield)
-	p.pieceMap.ReturnBlocks(p.localQ.ClearAll())
+	p.pieceMap.ReturnBlocks(p.queue.Close())
 
 	// ...
 
 	fmt.Printf("Peer (%v) closed.\n", p.id)
 }
 
-func (p *Peer) BlocksRequired() uint {
-	return uint(p.localQ.Capacity() - p.localQ.Size())
-}
-
-func (p *Peer) BlockWritten(index, begin uint32) {
-	// Update piece and check if finished
-	piece := p.pieceMap.Piece(index)
-	piece.BlockDone(begin)
-	if piece.IsComplete() {
-
-		// TODO: Must validate hash is correct.
-
-		p.localQ.Add(Have(index))
-	}
+func (p *Peer) BlocksRequired() int {
+	return p.queue.NumRequests()
 }
 
 func (p *Peer) CanDownload() bool {
-	return !p.state.localChoke && p.state.localInterest && !p.localQ.IsFull()
+	return !p.state.localChoke && p.state.localInterest
+}
+
+func (p * Peer) Choke() error {
+	return p.Add(Choke)
+}
+
+func (p * Peer) UnChoke() error {
+	return p.Add(Unchoke)
+}
+
+func (p * Peer) Add(pm ProtocolMessage) error {
+	return p.queue.Add(pm)
 }
 
 // ----------------------------------------------------------------------------------

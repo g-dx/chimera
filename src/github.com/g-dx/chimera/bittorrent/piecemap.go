@@ -138,14 +138,14 @@ func (p Piece) Length() uint32 {
 	return p.len
 }
 
-func (p * Piece) TakeBlocks(n uint) []*RequestMessage {
+func (p * Piece) TakeBlocks(n int) []*RequestMessage {
 
 	blocks := make([]*RequestMessage, 0, 5)
 	state := FULLY_REQUESTED
 	for i, s := range p.blocks {
 
 		// Take this block if we still need blocks
-		if s == NEEDED && uint(len(blocks)) != n {
+		if s == NEEDED && len(blocks) != n {
 			p.blocks[i] = REQUESTED
 			blocks = append(blocks, Request(p.index, uint32(i) * _16KB, _16KB))
 		}

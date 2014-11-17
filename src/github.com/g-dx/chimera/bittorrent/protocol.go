@@ -115,11 +115,11 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 		return
 	}
 
+	// TODO: Remove buffering!
 	in := make(chan ProtocolMessage, 10)
-	outHandshake := Handshake(ph.metaInfo.InfoHash)
 
 	// Attempt to establish connection
-	id, err := conn.Establish(in, ph.peerMsgs, ph.peerErrors, outHandshake, ph.dir)
+	id, err := conn.Establish(in, ph.peerMsgs, ph.peerErrors, Handshake(ph.metaInfo.InfoHash), ph.dir)
 	if err != nil {
 		ph.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
 		conn.Close()
@@ -127,9 +127,8 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 	}
 
 	// Connected
-	p := NewPeer(id, in, ph.metaInfo, ph.pieceMap, ph.logger)
-	ph.logger.Printf("New Peer: %v\n", p)
-	ph.newPeers <- p
+	ph.logger.Printf("New Peer: %v\n", id)
+	ph.newPeers <- NewPeer(id, NewQueue(in), ph.metaInfo, ph.pieceMap, ph.logger)
 }
 
 func (ph *ProtocolHandler) onPeerMessage(id *PeerIdentity, msg ProtocolMessage) {

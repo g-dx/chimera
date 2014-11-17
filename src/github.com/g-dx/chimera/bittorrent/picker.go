@@ -65,14 +65,14 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap) {
 	}
 }
 
-func TakeBlocks(pieces []*Piece, numRequired uint, p *Peer) {
+func TakeBlocks(pieces []*Piece, numRequired int, p *Peer) {
 	n := numRequired
 	for _, piece := range pieces {
 		reqs := piece.TakeBlocks(n)
-		n -= uint(len(reqs))
+		n -= len(reqs)
 		for _, req := range reqs {
 			fmt.Printf("Picker: %v, Peer: %v\n", req, p.id)
-			p.localQ.Add(req)
+			p.queue.Add(req)
 		}
 	}
 }
