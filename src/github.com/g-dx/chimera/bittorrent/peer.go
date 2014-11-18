@@ -200,6 +200,7 @@ func (p *Peer) Close() {
 }
 
 func (p *Peer) BlocksRequired() int {
+	// TODO: Fix me!
 	return p.queue.NumRequests()
 }
 
@@ -207,12 +208,23 @@ func (p *Peer) CanDownload() bool {
 	return !p.state.localChoke && p.state.localInterest
 }
 
-func (p *Peer) Choke() error {
+func (p *Peer) Choke(snubbed bool) error {
+	// TODO: Mark so that the choker knows
 	return p.Add(Choke)
 }
 
-func (p *Peer) UnChoke() error {
+func (p *Peer) UnChoke(optimistic bool) error {
+	// TODO: Mark so that the choker knows
 	return p.Add(Unchoke)
+}
+
+func (p *Peer) IsOptimisticUnChoke() bool {
+	// TODO: Fix me!
+	return false
+}
+
+func (p *Peer) Cancel(index, begin, len uint32) error {
+	return p.Add(Cancel(index, begin, len))
 }
 
 func (p *Peer) Add(pm ProtocolMessage) error {
