@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 )
 
 const (
@@ -35,43 +36,62 @@ const (
 )
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
-// Basic message
+// Message Pools
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type ProtocolMessageWithId struct {
-	msg    ProtocolMessage
-	peerid *PeerIdentity
+var havePool = sync.Pool {
+	New: func() interface {} {
+		return &Have2Message{ basicMessage {haveId, haveLength, havePool, }, 0, }
+	},
 }
 
-func (m ProtocolMessageWithId) PeerId() *PeerIdentity {
-	return m.peerid
+var requestPool = sync.Pool {
+	New: func() interface {} {
+		return &Request2Message{ basicMessage {requestId, requestLength, requestPool, }, 0, 0, 0, }
+	},
 }
 
-func (m ProtocolMessageWithId) Msg() ProtocolMessage {
-	return m.msg
-}
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Basic message
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 type ProtocolMessage interface {
 	Id() byte
 	Len() uint32
 	String() string
+	PeerId() *PeerIdentity
+	Recycle()
 }
 
 type msg struct {
 	len uint32
 	id  byte
+	peerId *PeerIdentity
+	pool sync.Pool
+	name string
 }
 
-func (m msg) Id() byte {
+func (m *msg) Id() byte {
 	return m.id
 }
 
-func (m msg) Len() uint32 {
+func (m *msg) Len() uint32 {
 	return m.len
 }
 
-func (m msg) String() string {
-	return "KeepAlive" // TODO: again this isn't great!
+func (m *msg) PeerId() *PeerIdentity {
+	return m.peerId
+}
+
+func (m *msg) String() string {
+	return m.name
+}
+
+func (m *msg) Recycle() {
+	if m.pool != nil {
+		m.peerId = nil
+		m.pool.Put(m)
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -92,7 +112,6 @@ func init() {
 
 // TODO: This isn't great!
 type HandshakeMessage struct {
-	msg
 	protocol string
 	reserved [8]byte
 	infoHash []byte
@@ -106,7 +125,6 @@ func (m HandshakeMessage) String() string {
 // Incoming handshake
 func handshake(infoHash []byte, peerId []byte) *HandshakeMessage {
 	return &HandshakeMessage{
-		msg{uint32(handshakeLength - 4), 0}, // What a hack!...(sigh)
 		protocolName,
 		[8]byte{},
 		infoHash,
@@ -127,8 +145,7 @@ func Handshake(infoHash []byte) *HandshakeMessage {
 // KeepAlive <len=0000>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-// TODO: This isn't great!
-var KeepAliveMessage = &msg{0, 0}
+var KeepAlive = &msg{0, 0, nil, nil, "KeepAlive"}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Choke        <len=0001><id=0>
@@ -137,43 +154,16 @@ var KeepAliveMessage = &msg{0, 0}
 // Uninterested <len=0001><id=3>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type ChokeMessage struct {
-	msg
-}
-
-func (m ChokeMessage) String() string {
-	return "Choke"
-}
-
-type UnchokeMessage struct {
-	msg
-}
-
-func (m UnchokeMessage) String() string {
-	return "Unchoke"
-}
-
-type InterestedMessage struct {
-	msg
-}
-
-func (m InterestedMessage) String() string {
-	return "Interested"
-}
-
-type UninterestedMessage struct {
-	msg
-}
-
-func (m UninterestedMessage) String() string {
-	return "Uninterested"
-}
+type ChokeMessage msg
+type UnchokeMessage msg
+type InterestedMessage msg
+type UninterestedMessage msg
 
 var (
-	Choke        = &ChokeMessage{msg{len: chokeLength, id: chokeId}}
-	Unchoke      = &UnchokeMessage{msg{len: unchokeLength, id: unchokeId}}
-	Interested   = &InterestedMessage{msg{len: interestedLength, id: interestedId}}
-	Uninterested = &UninterestedMessage{msg{len: uninterestedLength, id: uninterestedId}}
+	Choke        = &ChokeMessage{len: chokeLength, id: chokeId, }
+	Unchoke      = &UnchokeMessage{len: unchokeLength, id: unchokeId}
+	Interested   = &InterestedMessage{len: interestedLength, id: interestedId}
+	Uninterested = &UninterestedMessage{len: uninterestedLength, id: uninterestedId}
 )
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -185,16 +175,19 @@ type HaveMessage struct {
 	index uint32
 }
 
-func (m HaveMessage) Index() uint32 {
+func (m *HaveMessage) Index() uint32 {
 	return m.index
 }
 
-func (m HaveMessage) String() string {
+func (m *HaveMessage) String() string {
 	return fmt.Sprintf("Have [%v]", m.index)
 }
 
 func Have(i uint32) *HaveMessage {
-	return &HaveMessage{msg{len: haveLength, id: haveId}, i}
+	have := havePool.Get().(*HaveMessage)
+	have.peerId = peerId
+	have.index = i
+	return have
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -206,11 +199,11 @@ type BitfieldMessage struct {
 	bits []byte
 }
 
-func (m BitfieldMessage) Bits() []uint8 {
+func (m *BitfieldMessage) Bits() []byte {
 	return m.bits
 }
 
-func (m BitfieldMessage) String() string {
+func (m *BitfieldMessage) String() string {
 	return fmt.Sprintf("Bitfield [%x]", m.bits)
 }
 
@@ -270,7 +263,7 @@ func (m BlockMessage) Begin() uint32 {
 	return m.begin
 }
 
-func (m BlockMessage) Block() []uint8 {
+func (m BlockMessage) Block() []byte {
 	return m.block
 }
 
@@ -389,7 +382,7 @@ func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {
 	msgLen := toUint32(buf[0:4])
 	remainingBuf := buf[4:]
 	if msgLen == 0 {
-		return remainingBuf, KeepAliveMessage
+		return remainingBuf, KeepAlive
 	}
 
 	// Do we have to unmarshal a message?

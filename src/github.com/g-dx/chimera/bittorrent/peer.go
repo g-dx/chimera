@@ -143,16 +143,19 @@ func (p *Peer) onHave(index uint32) error {
 
 func (p *Peer) onCancel(index, begin, length uint32) error {
 	// NOTE: Handled lower down the stack...
+	// p.disk.Cancel(index, begin, length, p.id)
 	return nil
 }
 
 func (p *Peer) onRequest(index, begin, length uint32) error {
 	// NOTE: Already on the way to disk...
+	// p.disk.Read(index, begin, length, p.id, p.queue.out)
 	return nil
 }
 
 func (p *Peer) onBlock(index, begin uint32, block []byte) error {
 	// NOTE: Already on the way to disk...
+	// p.disk.Write(index, begin, length, p.id)
 	p.Statistics().Downloaded(uint(len(block)))
 	return nil
 }
