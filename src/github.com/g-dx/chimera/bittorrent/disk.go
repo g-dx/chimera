@@ -94,10 +94,10 @@ type DiskAccess struct {
 }
 
 func NewDiskAccess(mi *MetaInfo,
-                   in <-chan DiskMessage,
-	               out chan<- DiskMessageResult,
-                   dir string,
-				   log *log.Logger) (*DiskAccess, error) {
+	in <-chan DiskMessage,
+	out chan<- DiskMessageResult,
+	dir string,
+	log *log.Logger) (*DiskAccess, error) {
 
 	// Read or create files
 	files, lens, err := initialise(mi.Files, dir)
@@ -182,8 +182,10 @@ func (da DiskAccess) loop() {
 
 			// Perform io op
 			switch msg := ioOp.(type) {
-			case *DiskReadMessage: res, err = da.onReadMessage(msg)
-			case *DiskWriteMessage: res, err = da.onWriteMessage(msg)
+			case *DiskReadMessage:
+				res, err = da.onReadMessage(msg)
+			case *DiskWriteMessage:
+				res, err = da.onWriteMessage(msg)
 			}
 
 			// Check for error
@@ -204,7 +206,7 @@ func (da DiskAccess) onReadMessage(drm *DiskReadMessage) (DiskMessageResult, err
 	if err != nil {
 		return nil, err
 	}
-	return &DiskReadResult{drm.Id(), Block(drm.index, drm.begin, buf)}, nil
+	return &DiskReadResult{drm.Id(), Block(drm.Id(), drm.index, drm.begin, buf)}, nil
 }
 
 func (da DiskAccess) onWriteMessage(drm *DiskWriteMessage) (DiskMessageResult, error) {
@@ -216,8 +218,8 @@ func (da DiskAccess) onWriteMessage(drm *DiskWriteMessage) (DiskMessageResult, e
 }
 
 func (da DiskAccess) onIO(buf []byte,
-					      index, begin uint32,
-	                      ioFn func(*os.File, []byte, uint64) (int, error)) error {
+	index, begin uint32,
+	ioFn func(*os.File, []byte, uint64) (int, error)) error {
 
 	start := (uint64(index) * uint64(da.mi.PieceLength)) + uint64(begin)
 	var bufOff uint64 = 0

@@ -91,7 +91,7 @@ func NewConnection(addr string) (*PeerConnection, error) {
 			c:             nil,
 			conn:          conn,
 			buffer:        make([]byte, 0),
-			pending:       make([]*ProtocolMessageWithId, 0, MAX_INCOMING_BUFFER),
+			pending:       make([]ProtocolMessage, 0, MAX_INCOMING_BUFFER),
 			readHandshake: false,
 		},
 		out: OutgoingPeerConnection{
@@ -105,7 +105,7 @@ func NewConnection(addr string) (*PeerConnection, error) {
 }
 
 func (pc *PeerConnection) Establish(in <-chan ProtocolMessage,
-	out chan<- *ProtocolMessageWithId,
+	out chan<- ProtocolMessage,
 	e chan<- PeerError,
 	handshake *HandshakeMessage,
 	logDir string) (*PeerIdentity, error) {
@@ -151,17 +151,19 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (pi 
 
 	// TODO: we should possibly be first reading if this is an incoming connection
 	// Write outgoing handshake & attempt to read incoming handshake
-	pc.out.append(outHandshake)
+	//	pc.out.append(outHandshake)
 	pc.out.writeOrReceiveFor(HANDSHAKE_TIMEOUT)
 	pc.in.readOrSleepFor(HANDSHAKE_TIMEOUT)
 	if len(pc.in.pending) == 0 {
 		return nil, errHandshakeNotReceived
 	}
-	msg := pc.in.pending[0]
+	_ = pc.in.pending[0]
 	pc.in.pending = pc.in.pending[1:]
 
 	// Assert handshake
-	inHandshake, ok := msg.Msg().(*HandshakeMessage)
+	var inHandshake HandshakeMessage
+	var ok bool
+	//	inHandshake, ok := msg.(*HandshakeMessage)
 	if !ok {
 		return nil, errFirstMessageNotHandshake
 	}
@@ -198,10 +200,10 @@ func (pc *PeerConnection) Close() error {
 
 type IncomingPeerConnection struct {
 	close         <-chan struct{}
-	c             chan<- *ProtocolMessageWithId
+	c             chan<- ProtocolMessage
 	conn          net.Conn
 	buffer        []byte
-	pending       []*ProtocolMessageWithId
+	pending       []ProtocolMessage
 	readHandshake bool
 	logger        *log.Logger
 }
@@ -242,9 +244,9 @@ func (ic *IncomingPeerConnection) readOrSleepFor(d time.Duration) int {
 	return n
 }
 
-func (ic *IncomingPeerConnection) maybeEnableSend() (chan<- *ProtocolMessageWithId, *ProtocolMessageWithId) {
-	var c chan<- *ProtocolMessageWithId
-	var next *ProtocolMessageWithId
+func (ic *IncomingPeerConnection) maybeEnableSend() (chan<- ProtocolMessage, ProtocolMessage) {
+	var c chan<- ProtocolMessage
+	var next ProtocolMessage
 	if len(ic.pending) > 0 {
 		next = ic.pending[0]
 		c = ic.c
@@ -253,14 +255,14 @@ func (ic *IncomingPeerConnection) maybeEnableSend() (chan<- *ProtocolMessageWith
 }
 
 func (ic *IncomingPeerConnection) maybeReadMessage(id *PeerIdentity) {
-	var msg *ProtocolMessageWithId
+	var msg ProtocolMessage
 	if !ic.readHandshake {
 		ic.buffer, msg = ReadHandshake(ic.buffer, id)
 		if msg != nil {
 			ic.readHandshake = true
 		}
 	} else {
-		ic.buffer, msg = UnmarshalWithId(ic.buffer, id)
+		ic.buffer, msg = Unmarshal(id, ic.buffer)
 	}
 
 	if msg != nil {
@@ -268,7 +270,7 @@ func (ic *IncomingPeerConnection) maybeReadMessage(id *PeerIdentity) {
 	}
 
 	// Remove keepalive
-	if msg != nil && msg.Msg() != KeepAliveMessage {
+	if msg != nil && msg != KeepAliveMessage {
 		ic.pending = append(ic.pending, msg)
 	}
 }

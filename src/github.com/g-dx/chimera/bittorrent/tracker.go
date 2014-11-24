@@ -1,13 +1,13 @@
 package bittorrent
 
 import (
-	"strings"
-	"net/url"
-	"github.com/g-dx/chimera/bencode"
-	"strconv"
 	"errors"
-	"net/http"
 	"fmt"
+	"github.com/g-dx/chimera/bencode"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 )
 
 // Request & response dictionary keys
@@ -32,12 +32,12 @@ type TrackerRequest struct {
 
 type TrackerResponse struct {
 	Interval, MinInterval uint
-	PeerAddresses []PeerAddress
+	PeerAddresses         []PeerAddress
 }
 
 type PeerAddress struct {
 	Id, Ip string
-	Port uint
+	Port   uint
 }
 
 func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
@@ -63,41 +63,48 @@ func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
 
 	// Parse response
 	return &TrackerResponse{
-		Interval       : uint(i(bdata, interval)),
-		MinInterval    : uint(i(bdata, minInterval)),
-		PeerAddresses  : toPeerAddresses(bdata[peers]),
+		Interval:      uint(i(bdata, interval)),
+		MinInterval:   uint(i(bdata, minInterval)),
+		PeerAddresses: toPeerAddresses(bdata[peers]),
 	}, nil
 
 }
 
-func buildUrl(req *TrackerRequest) string {
+type urlBuilder map[string]string
 
-	// Collect params
-	// TODO: Add methods to allow adding key+value to dictionary
-	params := make(map[string] string)
-	params[infoHash] = string(req.InfoHash)
-	params[numWanted] = strconv.FormatUint(uint64(req.NumWanted), 10)
-	params[peerId] = string(PeerId)
-	params[left] = strconv.FormatUint(req.Left, 10)
-
-	// Join params
-	pairs := make([]string, 0, len(params))
-	for k, v := range params {
-		pairs = append(pairs, k + "=" + url.QueryEscape(v))
-	}
-
-	return req.Url + "?" + strings.Join(pairs, "&")
+func (b *urlBuilder) Add(key string, val string) {
+	b[key] = val
 }
 
-func toPeerAddresses(v interface {}) []PeerAddress {
+func (b *urlBuilder) Build(url string) string {
+
+	// Escape & join params
+	pairs := make([]string, 0, len(b))
+	for k, v := range b {
+		pairs = append(pairs, k+"="+url.QueryEscape(v))
+	}
+	return url + "?" + strings.Join(pairs, "&")
+}
+
+func buildUrl(req *TrackerRequest) string {
+
+	builder := make(urlBuilder)
+	builder.Add(infoHash, string(req.InfoHash))
+	builder.Add(numWanted, strconv.FormatUint(uint64(req.NumWanted), 10))
+	builder.Add(peerId, string(PeerId))
+	builder.Add(left, strconv.FormatUint(req.Left, 10))
+	return builder.Build(req.Url)
+}
+
+func toPeerAddresses(v interface{}) []PeerAddress {
 
 	var peers []PeerAddress
-	switch val:= v.(type) {
+	switch val := v.(type) {
 
 	// Binary model
 	case string:
 
-		if len(val) % 6 != 0 {
+		if len(val)%6 != 0 {
 			panic(errors.New("peers value value is malformed."))
 		}
 
@@ -105,10 +112,10 @@ func toPeerAddresses(v interface {}) []PeerAddress {
 		peers = make([]PeerAddress, 0, len(val)/6)
 		for buf := []byte(val); len(buf) != 0; buf = buf[6:] {
 			peers = append(peers, PeerAddress{
-					Id : "unknown",
-					Ip : fmt.Sprintf("%d.%d.%d.%d", buf[0], buf[1], buf[2], buf[3]),
-					Port : (uint(buf[4]) << 8 & 0xFF00) + uint(buf[5]),
-				})
+				Id:   "unknown",
+				Ip:   fmt.Sprintf("%d.%d.%d.%d", buf[0], buf[1], buf[2], buf[3]),
+				Port: (uint(buf[4]) << 8 & 0xFF00) + uint(buf[5]),
+			})
 		}
 
 	// Dictionary model
@@ -116,11 +123,11 @@ func toPeerAddresses(v interface {}) []PeerAddress {
 
 		peers = make([]PeerAddress, 0, len(val))
 		for _, dict := range val {
-			peers = append(peers, PeerAddress {
-					Id : bs(dict, "peer id"),
-					Ip : bs(dict, "ip"),
-					Port: uint(i(dict, "port")),
-				})
+			peers = append(peers, PeerAddress{
+				Id:   bs(dict, "peer id"),
+				Ip:   bs(dict, "ip"),
+				Port: uint(i(dict, "port")),
+			})
 		}
 	default:
 		panic(errors.New("Unknown type of peers value."))

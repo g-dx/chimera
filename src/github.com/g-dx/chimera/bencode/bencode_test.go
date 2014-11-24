@@ -1,14 +1,13 @@
 package bencode
 
 import (
-	"testing"
 	"bytes"
 	"io/ioutil"
 	"path/filepath"
-	"reflect"
+	"testing"
 )
 
-var(
+var (
 	torrentData []byte
 )
 

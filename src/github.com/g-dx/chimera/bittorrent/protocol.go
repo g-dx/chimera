@@ -27,7 +27,7 @@ type ProtocolHandler struct {
 	done             chan struct{}
 	dir              string
 	logger           *log.Logger
-	peerMsgs         chan *ProtocolMessageWithId
+	peerMsgs         chan ProtocolMessage
 	peerErrors       chan PeerError
 	heartbeat        int64
 }
@@ -54,7 +54,7 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 		done:             make(chan struct{}),
 		dir:              dir,
 		logger:           logger,
-		peerMsgs:         make(chan *ProtocolMessageWithId, 100),
+		peerMsgs:         make(chan ProtocolMessage, 100),
 		peerErrors:       make(chan PeerError),
 	}
 
@@ -80,7 +80,7 @@ func (ph *ProtocolHandler) loop() {
 			ph.onTrackerResponse(r)
 
 		case m := <-ph.peerMsgs:
-			ph.onPeerMessage(m.PeerId(), m.Msg())
+			ph.onPeerMessage(m)
 
 		case e := <-ph.peerErrors:
 			ph.onPeerError(e.Id(), e.Error())
@@ -131,18 +131,16 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 	ph.newPeers <- NewPeer(id, NewQueue(in), ph.metaInfo, ph.pieceMap, ph.logger)
 }
 
-func (ph *ProtocolHandler) onPeerMessage(id *PeerIdentity, msg ProtocolMessage) {
+func (ph *ProtocolHandler) onPeerMessage(msg ProtocolMessage) {
 
-	p := ph.findPeer(id)
+	p := ph.findPeer(msg.PeerId())
 	if p != nil {
 		err := p.OnMessage(msg)
 		if err != nil {
 			ph.closePeer(p, err)
 		}
 	}
-
-	// TODO: msg.Dispose() -> Pool.Put(msg)
-
+	msg.Recycle()
 }
 
 func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {

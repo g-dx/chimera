@@ -1,10 +1,10 @@
 package bittorrent
 
 import (
-	"path/filepath"
-	"io/ioutil"
-	"testing"
 	"bytes"
+	"io/ioutil"
+	"path/filepath"
+	"testing"
 )
 
 var torrentData []byte
@@ -40,10 +40,6 @@ func TestNewMetaInfo(t *testing.T) {
 	byteEquals(t, []byte("Fill me in!"), metaInfo.InfoHash)
 }
 
-func unequalValue(t *testing.T, a, b interface {}) {
-	t.Errorf("Expected: (%v), Actual: (%v)", a, b)
-}
-
 func byteEquals(t *testing.T, a []byte, b []byte) {
 	if ok := bytes.Equal(a, b); !ok {
 		unequalValue(t, a, b)
@@ -60,4 +56,8 @@ func intEquals(t *testing.T, a int64, b int64) {
 	if a != b {
 		unequalValue(t, a, b)
 	}
+}
+
+func unequalValue(t *testing.T, a, b interface{}) {
+	t.Errorf("Expected: (%v), Actual: (%v)", a, b)
 }
