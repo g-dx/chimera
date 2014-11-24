@@ -72,18 +72,18 @@ func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
 
 type urlBuilder map[string]string
 
-func (b *urlBuilder) Add(key string, val string) {
+func (b urlBuilder) Add(key string, val string) {
 	b[key] = val
 }
 
-func (b *urlBuilder) Build(url string) string {
+func (b urlBuilder) Build(base string) string {
 
 	// Escape & join params
 	pairs := make([]string, 0, len(b))
 	for k, v := range b {
 		pairs = append(pairs, k+"="+url.QueryEscape(v))
 	}
-	return url + "?" + strings.Join(pairs, "&")
+	return base + "?" + strings.Join(pairs, "&")
 }
 
 func buildUrl(req *TrackerRequest) string {
