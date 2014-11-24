@@ -47,7 +47,7 @@ var havePool = &sync.Pool{
 
 var requestPool = &sync.Pool{
 	New: func() interface{} {
-		return &RequestMessage{GenericMessage{requestLength, requestId, nil, requestPool}, 0, 0, 0}
+		return &RequestMessage{BlockDetailsMessage{GenericMessage{requestLength, requestId, nil, requestPool}, 0, 0, 0,},}
 	},
 }
 
@@ -143,25 +143,25 @@ var KeepAliveMessage = &GenericMessage{0, 0, nil, nil}
 // Uninterested <len=0001><id=3>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type ChokeMessage GenericMessage
-type UnchokeMessage GenericMessage
-type InterestedMessage GenericMessage
-type UninterestedMessage GenericMessage
+type ChokeMessage struct { GenericMessage }
+type UnchokeMessage struct { GenericMessage }
+type InterestedMessage struct { GenericMessage }
+type UninterestedMessage struct { GenericMessage }
 
-func Choke(p *PeerIdentity) *ChokeMessage {
-	return &ChokeMessage{chokeLength, chokeId, p, nil}
+func Choke(p *PeerIdentity) ProtocolMessage {
+	return &GenericMessage{chokeLength, chokeId, p, nil}
 }
 
 func Unchoke(p *PeerIdentity) *UnchokeMessage {
-	return &UnchokeMessage{unchokeLength, unchokeId, p, nil}
+	return &UnchokeMessage{GenericMessage{unchokeLength, unchokeId, p, nil}}
 }
 
 func Interested(p *PeerIdentity) *InterestedMessage {
-	return &InterestedMessage{interestedLength, interestedId, p, nil}
+	return &InterestedMessage{GenericMessage{interestedLength, interestedId, p, nil}}
 }
 
 func Uninterested(p *PeerIdentity) *UninterestedMessage {
-	return &UninterestedMessage{uninterestedLength, uninterestedId, p, nil}
+	return &UninterestedMessage{GenericMessage{uninterestedLength, uninterestedId, p, nil}}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -223,8 +223,8 @@ func (m *BlockDetailsMessage) Length() uint32 {
 	return m.length
 }
 
-type CancelMessage BlockDetailsMessage
-type RequestMessage BlockDetailsMessage
+type CancelMessage struct { BlockDetailsMessage }
+type RequestMessage struct { BlockDetailsMessage }
 
 func Request(p *PeerIdentity, index, begin, length uint32) *RequestMessage {
 	req := requestPool.Get().(*RequestMessage)
@@ -237,10 +237,12 @@ func Request(p *PeerIdentity, index, begin, length uint32) *RequestMessage {
 
 func Cancel(p *PeerIdentity, index, begin, length uint32) *CancelMessage {
 	return &CancelMessage{
-		GenericMessage{cancelLength, cancelId, p, nil},
-		index,
-		begin,
-		length,
+		BlockDetailsMessage{
+			GenericMessage{cancelLength, cancelId, p, nil},
+			index,
+			begin,
+			length,
+		},
 	}
 }
 
@@ -275,7 +277,7 @@ func Block(p *PeerIdentity, index, begin uint32, block []byte) *BlockMessage {
 	}
 }
 
-func ReadHandshake(buf []byte, id *PeerIdentity) ([]byte, ProtocolMessage) {
+func ReadHandshake(buf []byte, id *PeerIdentity) ([]byte, *HandshakeMessage) {
 
 	// Do we have enough data for handshake?
 	if len(buf) < int(handshakeLength) {
@@ -313,12 +315,12 @@ func Marshal(pm ProtocolMessage) []byte {
 		marshal(w, binary.BigEndian, msg.id)
 		marshal(w, binary.BigEndian, msg.bits)
 
-	case *HandshakeMessage:
-		marshal(w, binary.BigEndian, uint8(len(msg.protocol)))
-		marshal(w, binary.BigEndian, []byte(msg.protocol))
-		marshal(w, binary.BigEndian, msg.reserved)
-		marshal(w, binary.BigEndian, msg.infoHash)
-		marshal(w, binary.BigEndian, []byte(PeerId))
+//	case *HandshakeMessage:
+//		marshal(w, binary.BigEndian, uint8(len(msg.protocol)))
+//		marshal(w, binary.BigEndian, []byte(msg.protocol))
+//		marshal(w, binary.BigEndian, msg.reserved)
+//		marshal(w, binary.BigEndian, msg.infoHash)
+//		marshal(w, binary.BigEndian, []byte(PeerId))
 
 	default:
 		marshal(w, binary.BigEndian, pm)

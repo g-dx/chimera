@@ -213,12 +213,12 @@ func (p *Peer) CanDownload() bool {
 
 func (p *Peer) Choke(snubbed bool) error {
 	// TODO: Mark so that the choker knows
-	return p.Add(Choke)
+	return p.Add(Choke(p.id))
 }
 
 func (p *Peer) UnChoke(optimistic bool) error {
 	// TODO: Mark so that the choker knows
-	return p.Add(Unchoke)
+	return p.Add(Unchoke(p.id))
 }
 
 func (p *Peer) IsOptimisticUnChoke() bool {
@@ -227,7 +227,7 @@ func (p *Peer) IsOptimisticUnChoke() bool {
 }
 
 func (p *Peer) Cancel(index, begin, len uint32) error {
-	return p.Add(Cancel(index, begin, len))
+	return p.Add(Cancel(p.id, index, begin, len))
 }
 
 func (p *Peer) Add(pm ProtocolMessage) error {

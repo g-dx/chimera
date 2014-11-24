@@ -138,7 +138,7 @@ func (p Piece) Length() uint32 {
 	return p.len
 }
 
-func (p * Piece) TakeBlocks(n int) []*RequestMessage {
+func (p * Piece) TakeBlocks(id *PeerIdentity, n int) []*RequestMessage {
 
 	blocks := make([]*RequestMessage, 0, 5)
 	state := FULLY_REQUESTED
@@ -147,7 +147,7 @@ func (p * Piece) TakeBlocks(n int) []*RequestMessage {
 		// Take this block if we still need blocks
 		if s == NEEDED && len(blocks) != n {
 			p.blocks[i] = REQUESTED
-			blocks = append(blocks, Request(p.index, uint32(i) * _16KB, _16KB))
+			blocks = append(blocks, Request(id, p.index, uint32(i) * _16KB, _16KB))
 		}
 
 		// Keep track of the overall piece a
