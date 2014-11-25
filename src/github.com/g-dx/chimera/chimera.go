@@ -7,7 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime/pprof"
-	"time"
+	//	"time"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 	defer cpu.Close()
 	defer mem.Close()
 
-	buf, err := ioutil.ReadFile("/Users/Dakeyras/Downloads/CentOS 6.5 x86_64 bin DVD1to2.torrent")
+	buf, err := ioutil.ReadFile("/Users/Dakeyras/Personal/Go Development/chimera/src/github.com/g-dx/chimera/bittorrent/testdata/CentOS-6.5-x86_64-bin-DVD1to2.torrent")
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -50,6 +50,7 @@ func main() {
 		InfoHash:  metaInfo.InfoHash,
 		NumWanted: 50,
 		Left:      metaInfo.TotalLength(),
+		Port:      8661,
 	}
 
 	//	reqJson, err := json.MarshalIndent(req, "", " ")
@@ -62,14 +63,14 @@ func main() {
 	}
 	fmt.Printf("Tracker Respose: %+v\n ")
 
-	// Create log directory
-	dir := fmt.Sprintf("/Users/Dakeyras/.chimera/%v [...%x]",
-		time.Now().Format("2006-01-02 15.04.05"),
-		metaInfo.InfoHash[15:])
-	err = os.Mkdir(dir, os.ModeDir|os.ModePerm)
-	if err != nil {
-		fmt.Printf("Failed to create torrent dir: %v\n", err)
-	}
+	//	// Create log directory
+	//	dir := fmt.Sprintf("/Users/Dakeyras/.chimera/%v [...%x]",
+	//		time.Now().Format("2006-01-02 15.04.05"),
+	//		metaInfo.InfoHash[15:])
+	//	err = os.Mkdir(dir, os.ModeDir|os.ModePerm)
+	//	if err != nil {
+	//		fmt.Printf("Failed to create torrent dir: %v\n", err)
+	//	}
 
 	//	tr := make(chan *bittorrent.TrackerResponse)
 	//	pc, err := bittorrent.NewProtocolHandler(metaInfo, dir, tr)
@@ -90,7 +91,7 @@ func main() {
 	//	diskR := make(chan DiskMessage)
 	//	go mockDisk(diskR, logger)
 
-	dIn := make(chan bittorrent.DiskMessage)
-	dOut := make(chan bittorrent.DiskMessageResult)
-	_, err = bittorrent.NewDiskAccess(metaInfo, dIn, dOut, dir, nil)
+	//	dIn := make(chan bittorrent.DiskMessage)
+	//	dOut := make(chan bittorrent.DiskMessageResult)
+	//	_, err = bittorrent.NewDiskAccess(metaInfo, dIn, dOut, dir, nil)
 }

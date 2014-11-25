@@ -41,13 +41,13 @@ const (
 
 var havePool = &sync.Pool{
 	New: func() interface{} {
-		return &HaveMessage{GenericMessage{haveLength, haveId, nil, havePool}, 0}
+		return &HaveMessage{GenericMessage{haveLength, haveId, nil, nil}, 0}
 	},
 }
 
 var requestPool = &sync.Pool{
 	New: func() interface{} {
-		return &RequestMessage{BlockDetailsMessage{GenericMessage{requestLength, requestId, nil, requestPool}, 0, 0, 0,},}
+		return &RequestMessage{BlockDetailsMessage{GenericMessage{requestLength, requestId, nil, nil}, 0, 0, 0}}
 	},
 }
 
@@ -143,24 +143,24 @@ var KeepAliveMessage = &GenericMessage{0, 0, nil, nil}
 // Uninterested <len=0001><id=3>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type ChokeMessage struct { GenericMessage }
-type UnchokeMessage struct { GenericMessage }
-type InterestedMessage struct { GenericMessage }
-type UninterestedMessage struct { GenericMessage }
+type ChokeMessage struct{ GenericMessage }
+type UnchokeMessage struct{ GenericMessage }
+type InterestedMessage struct{ GenericMessage }
+type UninterestedMessage struct{ GenericMessage }
 
 func Choke(p *PeerIdentity) ProtocolMessage {
-	return &GenericMessage{chokeLength, chokeId, p, nil}
+	return &ChokeMessage{GenericMessage{chokeLength, chokeId, p, nil}}
 }
 
-func Unchoke(p *PeerIdentity) *UnchokeMessage {
+func Unchoke(p *PeerIdentity) ProtocolMessage {
 	return &UnchokeMessage{GenericMessage{unchokeLength, unchokeId, p, nil}}
 }
 
-func Interested(p *PeerIdentity) *InterestedMessage {
+func Interested(p *PeerIdentity) ProtocolMessage {
 	return &InterestedMessage{GenericMessage{interestedLength, interestedId, p, nil}}
 }
 
-func Uninterested(p *PeerIdentity) *UninterestedMessage {
+func Uninterested(p *PeerIdentity) ProtocolMessage {
 	return &UninterestedMessage{GenericMessage{uninterestedLength, uninterestedId, p, nil}}
 }
 
@@ -181,6 +181,7 @@ func Have(p *PeerIdentity, i uint32) *HaveMessage {
 	have := havePool.Get().(*HaveMessage)
 	have.peerId = p
 	have.index = i
+	have.pool = havePool
 	return have
 }
 
@@ -223,8 +224,8 @@ func (m *BlockDetailsMessage) Length() uint32 {
 	return m.length
 }
 
-type CancelMessage struct { BlockDetailsMessage }
-type RequestMessage struct { BlockDetailsMessage }
+type CancelMessage struct{ BlockDetailsMessage }
+type RequestMessage struct{ BlockDetailsMessage }
 
 func Request(p *PeerIdentity, index, begin, length uint32) *RequestMessage {
 	req := requestPool.Get().(*RequestMessage)
@@ -232,6 +233,7 @@ func Request(p *PeerIdentity, index, begin, length uint32) *RequestMessage {
 	req.begin = begin
 	req.length = length
 	req.peerId = p
+	req.pool = requestPool
 	return req
 }
 
@@ -315,12 +317,12 @@ func Marshal(pm ProtocolMessage) []byte {
 		marshal(w, binary.BigEndian, msg.id)
 		marshal(w, binary.BigEndian, msg.bits)
 
-//	case *HandshakeMessage:
-//		marshal(w, binary.BigEndian, uint8(len(msg.protocol)))
-//		marshal(w, binary.BigEndian, []byte(msg.protocol))
-//		marshal(w, binary.BigEndian, msg.reserved)
-//		marshal(w, binary.BigEndian, msg.infoHash)
-//		marshal(w, binary.BigEndian, []byte(PeerId))
+		//	case *HandshakeMessage:
+		//		marshal(w, binary.BigEndian, uint8(len(msg.protocol)))
+		//		marshal(w, binary.BigEndian, []byte(msg.protocol))
+		//		marshal(w, binary.BigEndian, msg.reserved)
+		//		marshal(w, binary.BigEndian, msg.infoHash)
+		//		marshal(w, binary.BigEndian, []byte(PeerId))
 
 	default:
 		marshal(w, binary.BigEndian, pm)

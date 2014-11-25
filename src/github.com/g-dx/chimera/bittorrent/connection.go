@@ -256,14 +256,7 @@ func (ic *IncomingPeerConnection) maybeEnableSend() (chan<- ProtocolMessage, Pro
 
 func (ic *IncomingPeerConnection) maybeReadMessage(id *PeerIdentity) {
 	var msg ProtocolMessage
-	if !ic.readHandshake {
-		ic.buffer, msg = ReadHandshake(ic.buffer, id)
-		if msg != nil {
-			ic.readHandshake = true
-		}
-	} else {
-		ic.buffer, msg = Unmarshal(id, ic.buffer)
-	}
+	ic.buffer, msg = Unmarshal(id, ic.buffer)
 
 	if msg != nil {
 		ic.logger.Print(msg)
