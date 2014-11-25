@@ -36,8 +36,10 @@ func TestNewMetaInfo(t *testing.T) {
 	stringEquals(t, "CentOS-6.5-x86_64-bin-DVD1to2", metaInfo.Comment)
 	stringEquals(t, "mktorrent 1.0", metaInfo.CreatedBy)
 	intEquals(t, 1385853584, int64(metaInfo.CreationDate))
-	intEquals(t, 52428, int64(metaInfo.PieceLength))
-	byteEquals(t, []byte("Fill me in!"), metaInfo.InfoHash)
+	intEquals(t, 524288, int64(metaInfo.PieceLength))
+	byteEquals(t,
+		[]byte{77, 15, 92, 159, 158, 96, 107, 203, 24, 8, 187, 51, 227, 103, 148, 219, 158, 132, 7, 227},
+		metaInfo.InfoHash)
 }
 
 func byteEquals(t *testing.T, a []byte, b []byte) {
