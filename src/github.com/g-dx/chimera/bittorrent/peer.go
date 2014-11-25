@@ -135,7 +135,7 @@ func (p *Peer) onHave(index uint32) error {
 		p.pieceMap.Inc(index)
 
 		if p.isNowInteresting(index) {
-			p.queue.Add(Interested)
+			p.queue.Add(Interested(p.id))
 		}
 	}
 	return nil
@@ -176,7 +176,7 @@ func (p *Peer) onBitfield(bits []byte) error {
 	for i := uint32(0); i < p.state.bitfield.Size(); i++ {
 		if p.pieceMap.Piece(i).BlocksNeeded() {
 			p.state.localInterest = true
-			p.queue.Add(Interested)
+			p.queue.Add(Interested(p.id))
 			break
 		}
 	}

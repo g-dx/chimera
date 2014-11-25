@@ -42,24 +42,36 @@ func TestNewMetaInfo(t *testing.T) {
 		metaInfo.InfoHash)
 }
 
-func byteEquals(t *testing.T, a []byte, b []byte) {
+func byteEquals(t *testing.T, a, b []byte) {
 	if ok := bytes.Equal(a, b); !ok {
 		unequalValue(t, a, b)
 	}
 }
 
-func stringEquals(t *testing.T, a string, b string) {
+func stringEquals(t *testing.T, a, b string) {
 	if a != b {
 		unequalValue(t, a, b)
 	}
 }
 
-func intEquals(t *testing.T, a int64, b int64) {
+func intEquals(t *testing.T, a, b int64) {
 	if a != b {
 		unequalValue(t, a, b)
+	}
+}
+
+func errEquals(t *testing.T, a, b error) {
+	if a.Error() != b.Error() {
+		unequalValue(t, a, b)
+	}
+}
+
+func errIsNil(t *testing.T, a error) {
+	if a != nil {
+		t.Fatalf("\nExpected: %v\nActual  : %v", nil, a)
 	}
 }
 
 func unequalValue(t *testing.T, a, b interface{}) {
-	t.Errorf("Expected: (%v), Actual: (%v)", a, b)
+	t.Errorf("\nExpected: %v\nActual  : %v", a, b)
 }

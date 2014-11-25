@@ -140,7 +140,7 @@ func nextRune(buf []byte) rune {
 func decodeFnFor(r rune) func([]byte) (interface{}, []byte) {
 	fn := decodeFunctions[r]
 	if fn == nil {
-		panic(errors.New(fmt.Sprint("No decoding function found for character: %s", r)))
+		panic(errors.New(fmt.Sprintf("No decoding function found for character: '%s'", string(r))))
 	}
 	return fn
 }

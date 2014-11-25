@@ -6,6 +6,7 @@ import (
 	"github.com/g-dx/chimera/bencode"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -18,9 +19,10 @@ const (
 	peerId      = "peer_id"
 	minInterval = "min interval"
 	interval    = "interval"
-	failure     = "failure"
+	failure     = "failure reason"
 	left        = "left"
 	peers       = "peers"
+	port        = "port"
 )
 
 type TrackerRequest struct {
@@ -28,6 +30,7 @@ type TrackerRequest struct {
 	InfoHash  []byte
 	NumWanted uint
 	Left      uint64 // Must be 64-bit for large files
+	Port      uint
 }
 
 type TrackerResponse struct {
@@ -40,7 +43,17 @@ type PeerAddress struct {
 	Port   uint
 }
 
-func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
+func QueryTracker(req *TrackerRequest) (trp *TrackerResponse, err error) {
+
+	// Recover from any decoding panics & return error
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(runtime.Error); ok {
+				panic(r)
+			}
+			err = r.(error)
+		}
+	}()
 
 	// Build url & GET
 	resp, err := http.Get(buildUrl(req))
@@ -64,9 +77,9 @@ func QueryTracker(req *TrackerRequest) (*TrackerResponse, error) {
 	// Parse response
 	return &TrackerResponse{
 		Interval:      uint(i(bdata, interval)),
-		MinInterval:   uint(i(bdata, minInterval)),
+		MinInterval:   uint(optI(bdata, minInterval)),
 		PeerAddresses: toPeerAddresses(bdata[peers]),
-	}, nil
+	}, err
 
 }
 
@@ -81,8 +94,14 @@ func (b urlBuilder) Build(base string) string {
 	// Escape & join params
 	pairs := make([]string, 0, len(b))
 	for k, v := range b {
-		pairs = append(pairs, k+"="+url.QueryEscape(v))
+		pairs = append(pairs, url.QueryEscape(k)+"="+url.QueryEscape(v))
 	}
+
+	// Trim leading slash if present
+	if strings.HasSuffix(base, "/") {
+		base = base[0 : len(base)-1]
+	}
+
 	return base + "?" + strings.Join(pairs, "&")
 }
 
@@ -119,10 +138,18 @@ func toPeerAddresses(v interface{}) []PeerAddress {
 		}
 
 	// Dictionary model
-	case []map[string]interface{}:
+	case []interface{}:
 
 		peers = make([]PeerAddress, 0, len(val))
-		for _, dict := range val {
+		for _, v := range val {
+
+			// Check for map
+			var dict map[string]interface{}
+			var ok bool
+			if dict, ok = v.(map[string]interface{}); !ok {
+				panic(errors.New("Unknown type of peers value."))
+			}
+
 			peers = append(peers, PeerAddress{
 				Id:   bs(dict, "peer id"),
 				Ip:   bs(dict, "ip"),
