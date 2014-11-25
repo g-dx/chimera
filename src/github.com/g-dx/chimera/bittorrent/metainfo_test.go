@@ -2,8 +2,11 @@ package bittorrent
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -60,18 +63,39 @@ func intEquals(t *testing.T, a, b int64) {
 	}
 }
 
+func msgEquals(t *testing.T, a, b ProtocolMessage) {
+
+	if a.PeerId() != b.PeerId() {
+		unequalValue(t, a.PeerId(), b.PeerId())
+	}
+
+	sa := ToString(a)
+	sb := ToString(b)
+	if sa != sb {
+		unequalValue(t, sa, sb)
+	}
+}
+
 func errEquals(t *testing.T, a, b error) {
 	if a.Error() != b.Error() {
 		unequalValue(t, a, b)
 	}
 }
 
-func errIsNil(t *testing.T, a error) {
+func isNil(t *testing.T, a interface{}) {
 	if a != nil {
-		t.Fatalf("\nExpected: %v\nActual  : %v", nil, a)
+		t.Fatalf(buildUnequalMessage(nil, a))
 	}
 }
 
+// Do not call this from outside this package!
 func unequalValue(t *testing.T, a, b interface{}) {
-	t.Errorf("\nExpected: %v\nActual  : %v", a, b)
+	t.Errorf(buildUnequalMessage(a, b))
+}
+
+// Do not call this from outside this package!
+func buildUnequalMessage(a, b interface{}) string {
+	_, file, line, _ := runtime.Caller(3)
+	return fmt.Sprintf("\nFile    : %v:%v\nExpected: %v\nActual  : %v",
+		file[strings.LastIndex(file, "/")+1:len(file)], line, a, b)
 }

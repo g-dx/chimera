@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 )
 
@@ -304,28 +305,31 @@ func Marshal(pm ProtocolMessage) []byte {
 
 	// Encode struct
 	w := bytes.NewBuffer(make([]byte, 0, pm.Len()+4))
+
+	marshal(w, binary.BigEndian, pm.Len())
+	marshal(w, binary.BigEndian, pm.Id())
+
 	switch msg := pm.(type) {
+	case *HaveMessage:
+		marshal(w, binary.BigEndian, msg.index)
+
 	case *BlockMessage:
-		marshal(w, binary.BigEndian, msg.len)
-		marshal(w, binary.BigEndian, msg.id)
 		marshal(w, binary.BigEndian, msg.index)
 		marshal(w, binary.BigEndian, msg.begin)
 		marshal(w, binary.BigEndian, msg.block)
 
+	case *RequestMessage:
+		marshal(w, binary.BigEndian, msg.index)
+		marshal(w, binary.BigEndian, msg.begin)
+		marshal(w, binary.BigEndian, msg.length)
+
+	case *CancelMessage:
+		marshal(w, binary.BigEndian, msg.index)
+		marshal(w, binary.BigEndian, msg.begin)
+		marshal(w, binary.BigEndian, msg.length)
+
 	case *BitfieldMessage:
-		marshal(w, binary.BigEndian, msg.len)
-		marshal(w, binary.BigEndian, msg.id)
 		marshal(w, binary.BigEndian, msg.bits)
-
-		//	case *HandshakeMessage:
-		//		marshal(w, binary.BigEndian, uint8(len(msg.protocol)))
-		//		marshal(w, binary.BigEndian, []byte(msg.protocol))
-		//		marshal(w, binary.BigEndian, msg.reserved)
-		//		marshal(w, binary.BigEndian, msg.infoHash)
-		//		marshal(w, binary.BigEndian, []byte(PeerId))
-
-	default:
-		marshal(w, binary.BigEndian, pm)
 	}
 
 	return w.Bytes()
@@ -407,5 +411,34 @@ func marshal(w io.Writer, order binary.ByteOrder, data interface{}) {
 	err := binary.Write(w, order, data)
 	if err != nil {
 		panic(err)
+	}
+}
+
+func ToString(pm ProtocolMessage) string {
+	if pm == KeepAliveMessage {
+		return "KeepAlive"
+	}
+
+	switch m := pm.(type) {
+	case *ChokeMessage:
+		return "Choke"
+	case *UnchokeMessage:
+		return "Unchoke"
+	case *InterestedMessage:
+		return "Interested"
+	case *UninterestedMessage:
+		return "Uninterested"
+	case *HaveMessage:
+		return fmt.Sprintf("Have [%v]", m.index)
+	case *BlockMessage:
+		return fmt.Sprintf("Block [index:%v, begin:%v, %x...]", m.index, m.begin, m.block[0:int(math.Min(10, float64(len(m.block))))])
+	case *CancelMessage:
+		return fmt.Sprintf("Cancel [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
+	case *RequestMessage:
+		return fmt.Sprintf("Request [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
+	case *BitfieldMessage:
+		return fmt.Sprintf("Bitfield [%x]", m.bits)
+	default:
+		return "Unknown Message"
 	}
 }

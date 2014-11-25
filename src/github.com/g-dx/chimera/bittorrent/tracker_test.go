@@ -46,7 +46,7 @@ func TestDictionaryModel(t *testing.T) {
 
 	// Get response
 	resp, err := QueryTracker(request(tk.URL))
-	errIsNil(t, err)
+	isNil(t, err)
 
 	// Check contents
 	intEquals(t, 1800, int64(resp.Interval))
@@ -66,7 +66,7 @@ func TestBinaryModel(t *testing.T) {
 
 	// Get response
 	resp, err := QueryTracker(request(tk.URL))
-	errIsNil(t, err)
+	isNil(t, err)
 
 	// Check contents
 	intEquals(t, 60, int64(resp.Interval))
