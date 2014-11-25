@@ -115,8 +115,7 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 		return
 	}
 
-	// TODO: Remove buffering!
-	in := make(chan ProtocolMessage, 10)
+	in := make(chan ProtocolMessage)
 
 	// Attempt to establish connection
 	id, err := conn.Establish(in, ph.peerMsgs, ph.peerErrors, Handshake(ph.metaInfo.InfoHash), ph.dir)
