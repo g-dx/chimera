@@ -154,6 +154,8 @@ func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
 
 func (ph *ProtocolHandler) onHeartbeat() {
 
+	// TODO: Check all peer queues for expired requests
+
 	// Run choking algorithm
 	if ph.heartbeat%10 == 0 {
 		// Run choker
