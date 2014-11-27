@@ -29,7 +29,6 @@ type ProtocolHandler struct {
 	logger           *log.Logger
 	peerMsgs         chan ProtocolMessage
 	peerErrors       chan PeerError
-	heartbeat        int64
 }
 
 func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*ProtocolHandler, error) {
@@ -70,11 +69,13 @@ func (ph *ProtocolHandler) AwaitDone() {
 
 func (ph *ProtocolHandler) loop() {
 
+	beat := int64(0)
 	for {
 
 		select {
 		case <-time.After(ONE_SECOND):
-			ph.onHeartbeat()
+			ph.onHeartbeat(beat)
+			beat++
 
 		case r := <-ph.trackerResponses:
 			ph.onTrackerResponse(r)
@@ -151,20 +152,17 @@ func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
 	// 3. Log errors
 }
 
-func (ph *ProtocolHandler) onHeartbeat() {
+func (ph *ProtocolHandler) onHeartbeat(heartbeat int64) {
 
 	// TODO: Check all peer queues for expired requests
 
 	// Run choking algorithm
-	if ph.heartbeat%10 == 0 {
+	if heartbeat%10 == 0 {
 		// Run choker
 	}
 
 	// Run piece picking algorithm
 	PickPieces(ph.peers, ph.pieceMap)
-
-	// Inc heartbeat
-	ph.heartbeat++
 }
 
 func (ph *ProtocolHandler) onPeerError(id *PeerIdentity, err error) {
@@ -179,7 +177,7 @@ func (ph *ProtocolHandler) maybeConnect(r chan<- PeerConnectResult) {
 
 	peerCount := len(ph.peers)
 	if peerCount < idealPeers {
-
+		// TODO: fix me!
 	}
 }
 
