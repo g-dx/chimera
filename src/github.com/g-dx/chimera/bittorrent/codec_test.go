@@ -1,30 +1,35 @@
 package bittorrent
 
-import "testing"
+import (
+	"testing"
+)
+
+const (
+	lenSize = 4
+)
 
 func TestEncode(t *testing.T) {
 
-	byteEquals(t, []byte{0, 0, 0, 0},
-		Marshal(KeepAliveMessage))
-	byteEquals(t, []byte{0, 0, 0, 1, 0},
-		Marshal(Choke(nil)))
-	byteEquals(t, []byte{0, 0, 0, 1, 1},
-		Marshal(Unchoke(nil)))
-	byteEquals(t, []byte{0, 0, 0, 1, 2},
-		Marshal(Interested(nil)))
-	byteEquals(t, []byte{0, 0, 0, 1, 3},
-		Marshal(Uninterested(nil)))
-	byteEquals(t, []byte{0, 0, 0, 5, 4, 0, 0, 0, 1},
-		Marshal(Have(nil, 1)))
-	byteEquals(t, []byte{0, 0, 0, 4, 5, 1, 2, 3},
-		Marshal(Bitfield(nil, []byte{1, 2, 3})))
+	byteEquals(t, []byte{0, 0, 0, 0}, encodeTo(KeepAlive))
+	byteEquals(t, []byte{0, 0, 0, 1, 0}, encodeTo(Choke(nil)))
+	byteEquals(t, []byte{0, 0, 0, 1, 1}, encodeTo(Unchoke(nil)))
+	byteEquals(t, []byte{0, 0, 0, 1, 2}, encodeTo(Interested(nil)))
+	byteEquals(t, []byte{0, 0, 0, 1, 3}, encodeTo(Uninterested(nil)))
+	byteEquals(t, []byte{0, 0, 0, 5, 4, 0, 0, 0, 1}, encodeTo(Have(nil, 1)))
+	byteEquals(t, []byte{0, 0, 0, 4, 5, 1, 2, 3}, encodeTo(Bitfield(nil, []byte{1, 2, 3})))
 	byteEquals(t, []byte{0, 0, 0, 13, 6, 0, 0, 0, 12, 0, 0, 0, 128, 0, 0, 32, 0},
-		Marshal(Request(nil, 12, 128, 8192)))
+		encodeTo(Request(nil, 12, 128, 8192)))
 	byteEquals(t, []byte{0, 0, 0, 19, 7, 0, 0, 1, 0, 0, 0, 0, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-		Marshal(Block(nil, 256, 10, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})))
+		encodeTo(Block(nil, 256, 10, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})))
 	byteEquals(t, []byte{0, 0, 0, 13, 8, 0, 0, 0, 3, 0, 0, 3, 0, 0, 0, 181, 253},
-		Marshal(Cancel(nil, 3, 768, 46589)))
+		encodeTo(Cancel(nil, 3, 768, 46589)))
 
+}
+
+func encodeTo(pm ProtocolMessage) []byte {
+	buffer := make([]byte, int(lenSize+pm.Len()))
+	Marshal(pm, buffer)
+	return buffer
 }
 
 func TestDecode(t *testing.T) {
@@ -33,7 +38,7 @@ func TestDecode(t *testing.T) {
 	id := &PeerIdentity{[]byte("unknown"), "addr"}
 
 	remainingBuf, pm := Unmarshal(id, buf)
-	msgEquals(t, KeepAliveMessage, pm)
+	msgEquals(t, KeepAlive, pm)
 	remainingBuf, pm = Unmarshal(id, remainingBuf)
 	msgEquals(t, Choke(id), pm)
 

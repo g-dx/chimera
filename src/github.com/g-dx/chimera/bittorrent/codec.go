@@ -1,12 +1,10 @@
 package bittorrent
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"sync"
 )
@@ -26,6 +24,7 @@ const (
 
 const (
 	// Fixed message lengths
+	keepAliveLength    uint32 = 0
 	chokeLength        uint32 = 1
 	unchokeLength      uint32 = 1
 	interestedLength   uint32 = 1
@@ -135,7 +134,9 @@ func Handshake(infoHash []byte) *HandshakeMessage {
 // KeepAlive <len=0000>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-var KeepAliveMessage = &GenericMessage{0, 0, nil, nil}
+type KeepAliveMessage struct{ GenericMessage }
+
+var KeepAlive = &KeepAliveMessage{GenericMessage{keepAliveLength, 0, nil, nil}}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Choke        <len=0001><id=0>
@@ -280,6 +281,11 @@ func Block(p *PeerIdentity, index, begin uint32, block []byte) *BlockMessage {
 	}
 }
 
+func WriteHandshake(h *HandshakeMessage, buf []byte) error {
+	// TODO: implement me!
+	return nil
+}
+
 func ReadHandshake(buf []byte, id *PeerIdentity) ([]byte, *HandshakeMessage) {
 
 	// Do we have enough data for handshake?
@@ -296,43 +302,38 @@ func ReadHandshake(buf []byte, id *PeerIdentity) ([]byte, *HandshakeMessage) {
 	return remainingBuf, handshake(id, data[28:48], data[48:handshakeLength])
 }
 
-func Marshal(pm ProtocolMessage) []byte {
+func Marshal(pm ProtocolMessage, buf []byte) {
 
-	// TODO: This isn't great
-	if pm == KeepAliveMessage {
-		return make([]byte, 4)
+	// NOTE: buf is always guaranteed to be able to hold the message
+
+	// Add len & id
+	PutUint32(buf[0:4], pm.Len())
+	if pm.Id() != 0 {
+		buf[4] = pm.Id()
 	}
-
-	// Encode struct
-	w := bytes.NewBuffer(make([]byte, 0, pm.Len()+4))
-
-	marshal(w, binary.BigEndian, pm.Len())
-	marshal(w, binary.BigEndian, pm.Id())
 
 	switch msg := pm.(type) {
 	case *HaveMessage:
-		marshal(w, binary.BigEndian, msg.index)
+		PutUint32(buf[5:9], msg.index)
 
 	case *BlockMessage:
-		marshal(w, binary.BigEndian, msg.index)
-		marshal(w, binary.BigEndian, msg.begin)
-		marshal(w, binary.BigEndian, msg.block)
+		PutUint32(buf[5:9], msg.index)
+		PutUint32(buf[9:13], msg.begin)
+		copy(buf[13:len(msg.block)+13], msg.block)
 
 	case *RequestMessage:
-		marshal(w, binary.BigEndian, msg.index)
-		marshal(w, binary.BigEndian, msg.begin)
-		marshal(w, binary.BigEndian, msg.length)
+		PutUint32(buf[5:9], msg.index)
+		PutUint32(buf[9:13], msg.begin)
+		PutUint32(buf[13:17], msg.length)
 
 	case *CancelMessage:
-		marshal(w, binary.BigEndian, msg.index)
-		marshal(w, binary.BigEndian, msg.begin)
-		marshal(w, binary.BigEndian, msg.length)
+		PutUint32(buf[5:9], msg.index)
+		PutUint32(buf[9:13], msg.begin)
+		PutUint32(buf[13:17], msg.length)
 
 	case *BitfieldMessage:
-		marshal(w, binary.BigEndian, msg.bits)
+		copy(buf[5:len(msg.bits)+5], msg.bits)
 	}
-
-	return w.Bytes()
 }
 
 func Unmarshal(p *PeerIdentity, buf []byte) ([]byte, ProtocolMessage) {
@@ -343,10 +344,10 @@ func Unmarshal(p *PeerIdentity, buf []byte) ([]byte, ProtocolMessage) {
 	}
 
 	// Check: Keepalive
-	msgLen := toUint32(buf[0:4])
+	msgLen := Uint32(buf[0:4])
 	remainingBuf := buf[4:]
 	if msgLen == 0 {
-		return remainingBuf, KeepAliveMessage
+		return remainingBuf, KeepAlive
 	}
 
 	// Do we have to unmarshal a message?
@@ -371,23 +372,23 @@ func Unmarshal(p *PeerIdentity, buf []byte) ([]byte, ProtocolMessage) {
 	case uninterestedId:
 		return remainingBuf, Uninterested(p)
 	case haveId:
-		index := toUint32(data)
+		index := Uint32(data)
 		return remainingBuf, Have(p, index)
 	case bitfieldId:
 		return remainingBuf, Bitfield(p, data)
 	case requestId:
-		index := toUint32(data[0:4])
-		begin := toUint32(data[4:8])
-		length := toUint32(data[8:12])
+		index := Uint32(data[0:4])
+		begin := Uint32(data[4:8])
+		length := Uint32(data[8:12])
 		return remainingBuf, Request(p, index, begin, length)
 	case blockId:
-		index := toUint32(data[0:4])
-		begin := toUint32(data[4:8])
+		index := Uint32(data[0:4])
+		begin := Uint32(data[4:8])
 		return remainingBuf, Block(p, index, begin, data[8:])
 	case cancelId:
-		index := toUint32(data[0:4])
-		begin := toUint32(data[4:8])
-		length := toUint32(data[8:12])
+		index := Uint32(data[0:4])
+		begin := Uint32(data[4:8])
+		length := Uint32(data[8:12])
 		return remainingBuf, Cancel(p, index, begin, length)
 	default:
 		fmt.Printf("Unknown message: %v", data)
@@ -395,31 +396,21 @@ func Unmarshal(p *PeerIdentity, buf []byte) ([]byte, ProtocolMessage) {
 	}
 }
 
-func toUint32(bytes []byte) uint32 {
-
-	var a uint32
-	l := len(bytes)
-	for i, b := range bytes {
-		shift := uint32((l - i - 1) * 8)
-		a |= uint32(b) << shift
-	}
-	return a
+// Private function to read byte slice to uint32
+func Uint32(bytes []byte) uint32 {
+	return binary.BigEndian.Uint32(bytes)
 }
 
-// Private function to panic on write problems
-func marshal(w io.Writer, order binary.ByteOrder, data interface{}) {
-	err := binary.Write(w, order, data)
-	if err != nil {
-		panic(err)
-	}
+// Private function to write uint32 into byte slice
+func PutUint32(b []byte, i uint32) {
+	binary.BigEndian.PutUint32(b, i)
 }
 
 func ToString(pm ProtocolMessage) string {
-	if pm == KeepAliveMessage {
-		return "KeepAlive"
-	}
 
 	switch m := pm.(type) {
+	case *KeepAliveMessage:
+		return "KeepAlive"
 	case *ChokeMessage:
 		return "Choke"
 	case *UnchokeMessage:

@@ -263,7 +263,7 @@ func (ic *IncomingPeerConnection) maybeReadMessage(id *PeerIdentity) {
 	}
 
 	// Remove keepalive
-	if msg != nil && msg != KeepAliveMessage {
+	if msg != nil && msg != KeepAlive {
 		ic.pending = append(ic.pending, msg)
 	}
 }
@@ -289,7 +289,7 @@ func (oc *OutgoingPeerConnection) loop(err chan<- PeerError, id *PeerIdentity) {
 		case <-oc.close:
 			break
 		case <-keepAlive:
-			oc.append(KeepAliveMessage)
+			oc.append(KeepAlive)
 		case msg := <-c:
 			oc.append(msg)
 		default:
@@ -311,7 +311,10 @@ func (oc *OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
 
 func (oc *OutgoingPeerConnection) append(msg ProtocolMessage) {
 	oc.logger.Print(msg)
-	oc.curr = append(oc.curr, Marshal(msg)...)
+
+	buffer := make([]byte, int(4+msg.Len()))
+	Marshal(msg, buffer)
+	oc.curr = append(oc.curr, buffer...)
 }
 
 func (oc *OutgoingPeerConnection) writeOrReceiveFor(d time.Duration) (bytes int) {
@@ -321,7 +324,9 @@ func (oc *OutgoingPeerConnection) writeOrReceiveFor(d time.Duration) (bytes int)
 		// Receive until timeout
 		select {
 		case msg := <-oc.c:
-			oc.curr = Marshal(msg)
+			buffer := make([]byte, int(4+msg.Len()))
+			Marshal(msg, buffer)
+			oc.curr = buffer
 		case <-time.After(d):
 		}
 	} else {
