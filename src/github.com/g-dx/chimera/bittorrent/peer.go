@@ -174,7 +174,7 @@ func (p *Peer) onBitfield(bits []byte) error {
 
 	// Check if we are interested
 	for i := uint32(0); i < p.state.bitfield.Size(); i++ {
-		if p.pieceMap.Piece(i).BlocksNeeded() {
+		if p.pieceMap.Piece(i).RequestsRequired() {
 			p.state.localInterest = true
 			p.queue.Add(Interested(p.id))
 			break
@@ -188,7 +188,7 @@ func (p Peer) Statistics() *Statistics {
 }
 
 func (p *Peer) isNowInteresting(index uint32) bool {
-	return !p.state.localInterest && p.pieceMap.Piece(index).BlocksNeeded()
+	return !p.state.localInterest && p.pieceMap.Piece(index).RequestsRequired()
 }
 
 func (p *Peer) Close() {

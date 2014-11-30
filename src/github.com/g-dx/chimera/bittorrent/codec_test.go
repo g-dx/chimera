@@ -75,8 +75,8 @@ func TestDecode(t *testing.T) {
 	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 14, 7, 0, 0, 0, 1, 0, 0, 0, 2, 255, 255, 255, 255, 255, 10}...)
 	remainingBuf, pm = Unmarshal(id, remainingBuf)
 	msgEquals(t, Block(id, 1, 2, []byte{255, 255, 255, 255, 255}), pm)
-	intEquals(t, int64(len(remainingBuf)), 1)
-	intEquals(t, int64(remainingBuf[0]), 10)
+	intEquals(t, 1, len(remainingBuf))
+	intEquals(t, 10, int(remainingBuf[0]))
 	remainingBuf = []byte{}
 
 	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 13, 8, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 6}...)

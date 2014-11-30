@@ -49,8 +49,8 @@ func TestDictionaryModel(t *testing.T) {
 	isNil(t, err)
 
 	// Check contents
-	intEquals(t, 1800, int64(resp.Interval))
-	intEquals(t, 1, int64(len(resp.PeerAddresses)))
+	uintEquals(t, 1800, resp.Interval)
+	intEquals(t, 1, len(resp.PeerAddresses))
 	addr := resp.PeerAddresses[0]
 	stringEquals(t, "67.188.136.26:51413", addr.GetIpAndPort())
 	stringEquals(t, "-TR2820-9xt2vdu8kjxp", addr.Id)
@@ -69,8 +69,8 @@ func TestBinaryModel(t *testing.T) {
 	isNil(t, err)
 
 	// Check contents
-	intEquals(t, 60, int64(resp.Interval))
-	intEquals(t, 2, int64(len(resp.PeerAddresses)))
+	uintEquals(t, 60, resp.Interval)
+	intEquals(t, 2, len(resp.PeerAddresses))
 	addr := resp.PeerAddresses[0]
 	stringEquals(t, "1.2.3.4:255", addr.GetIpAndPort())
 	stringEquals(t, "unknown", addr.Id)

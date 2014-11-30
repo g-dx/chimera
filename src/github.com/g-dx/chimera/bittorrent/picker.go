@@ -1,8 +1,8 @@
 package bittorrent
 
 import (
-	"sort"
 	"fmt"
+	"sort"
 )
 
 /**
@@ -15,22 +15,21 @@ import (
 
 type ByDownloadSpeed []*Peer
 
-func (b ByDownloadSpeed) Len() int { return len(b) }
+func (b ByDownloadSpeed) Len() int      { return len(b) }
 func (b ByDownloadSpeed) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
 func (b ByDownloadSpeed) Less(i, j int) bool {
 	return b[i].Statistics().bytesDownloadedPerUpdate < b[j].Statistics().bytesDownloadedPerUpdate
 }
 
-type ByAvailability []*Piece
-func (b ByAvailability) Len() int { return len(b) }
-func (b ByAvailability) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
-func (b ByAvailability) Less(i, j int) bool { return b[i].Availability() < b[j].Availability() }
+type ByPriority []*Piece
 
-func PickPieces(peers []*Peer, pieceMap *PieceMap) {
+func (b ByPriority) Len() int           { return len(b) }
+func (b ByPriority) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
+func (b ByPriority) Less(i, j int) bool { return b[i].Priority() < b[j].Priority() }
+
+func PickPieces(peers []*Peer, pieceMap *PieceMap) bool {
 
 	fmt.Println("Running piece picker...")
-	// Sort by availability
-	sort.Sort(ByAvailability(pieceMap.pieces))
 
 	// Update counters
 	for _, p := range peers {
@@ -40,29 +39,34 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap) {
 	// Sort into fastest downloaders
 	sort.Sort(ByDownloadSpeed(peers))
 
-	// For each unchoked & interesting peer calculate the rarest 20 pieces they have
+	// For each unchoked & interesting peer calculate blocks to pick
+	pieces := make([]*Piece, 0, len(pieceMap.pieces))
 	for _, peer := range peers {
 		if peer.CanDownload() {
 
 			fmt.Printf("Finding pieces for peer: %v\n", peer.id)
 
-			// Find 10 rarest available pieces with blocks still required
-			pieces := make([]*Piece, 0, 10)
+			// Find all pieces which this peer has which still require blocks
 			for _, piece := range pieceMap.pieces {
-				if piece.state == BLOCKS_NEEDED && peer.state.bitfield.Have(piece.index) {
+				if !piece.FullyRequested() && peer.state.bitfield.Have(piece.index) {
 					pieces = append(pieces, piece)
-					if len(pieces) == 10 {
-						break
-					}
 				}
 			}
+
+			// Sort peer-specific pieces by priority
+			sort.Sort(ByPriority(pieces))
 
 			fmt.Printf("Peer: %v rarest pieces: %v\n", peer.id, pieces)
 
 			// Attempt to pick the number of required blocks
 			TakeBlocks(pieces, peer.BlocksRequired(), peer)
 		}
+
+		// Clear peer list
+		pieces = pieces[:0]
 	}
+
+	return false
 }
 
 func TakeBlocks(pieces []*Piece, numRequired int, p *Peer) {

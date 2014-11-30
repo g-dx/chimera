@@ -38,8 +38,8 @@ func TestNewMetaInfo(t *testing.T) {
 	stringEquals(t, "http://torrent.centos.org:6969/announce", metaInfo.Announce)
 	stringEquals(t, "CentOS-6.5-x86_64-bin-DVD1to2", metaInfo.Comment)
 	stringEquals(t, "mktorrent 1.0", metaInfo.CreatedBy)
-	intEquals(t, 1385853584, int64(metaInfo.CreationDate))
-	intEquals(t, 524288, int64(metaInfo.PieceLength))
+	int64Equals(t, 1385853584, int64(metaInfo.CreationDate))
+	int64Equals(t, 524288, int64(metaInfo.PieceLength))
 	byteEquals(t,
 		[]byte{77, 15, 92, 159, 158, 96, 107, 203, 24, 8, 187, 51, 227, 103, 148, 219, 158, 132, 7, 227},
 		metaInfo.InfoHash)
@@ -57,7 +57,37 @@ func stringEquals(t *testing.T, a, b string) {
 	}
 }
 
-func intEquals(t *testing.T, a, b int64) {
+func boolEquals(t *testing.T, a, b bool) {
+	if a != b {
+		unequalValue(t, a, b)
+	}
+}
+
+func intLessThan(t *testing.T, a, b int) {
+	if a < b {
+
+	}
+}
+
+func uintEquals(t *testing.T, a, b uint) {
+	if a != b {
+		unequalValue(t, a, b)
+	}
+}
+
+func intEquals(t *testing.T, a, b int) {
+	if a != b {
+		unequalValue(t, a, b)
+	}
+}
+
+func uint32Equals(t *testing.T, a, b uint32) {
+	if a != b {
+		unequalValue(t, a, b)
+	}
+}
+
+func int64Equals(t *testing.T, a, b int64) {
 	if a != b {
 		unequalValue(t, a, b)
 	}
