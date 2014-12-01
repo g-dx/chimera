@@ -158,7 +158,7 @@ func (p *Peer) onRequest(index, begin, length uint32) error {
 func (p *Peer) onBlock(index, begin uint32, block []byte) error {
 	// NOTE: Already on the way to disk...
 	// p.disk.Write(index, begin, length, p.id)
-	p.Statistics().Downloaded(uint(len(block)))
+	p.Stats().Downloaded(uint(len(block)))
 	return nil
 }
 
@@ -185,7 +185,7 @@ func (p *Peer) onBitfield(bits []byte) error {
 	return nil
 }
 
-func (p Peer) Statistics() *Statistics {
+func (p Peer) Stats() *Statistics {
 	return p.statistics
 }
 
@@ -257,6 +257,10 @@ type Statistics struct {
 	bytesDownloadedPerUpdate uint
 	bytesDownloaded          uint
 
+	totalBytesUploaded     uint64
+	bytesUploadedPerUpdate uint
+	bytesUploaded          uint
+
 	totalBytesWritten     uint64
 	bytesWrittenPerUpdate uint
 	bytesWritten          uint
@@ -267,8 +271,14 @@ func (s *Statistics) Update() {
 	// Update & reset
 	s.bytesDownloadedPerUpdate = s.bytesDownloaded
 	s.bytesDownloaded = 0
+	s.bytesUploadedPerUpdate = s.bytesUploaded
+	s.bytesUploaded = 0
 	s.bytesWrittenPerUpdate = s.bytesWritten
 	s.bytesWritten = 0
+}
+
+func (s *Statistics) Uploaded(n uint) {
+	s.bytesUploaded += n
 }
 
 func (s *Statistics) Downloaded(n uint) {
@@ -277,4 +287,12 @@ func (s *Statistics) Downloaded(n uint) {
 
 func (s *Statistics) Written(n uint) {
 	s.bytesWritten += n
+}
+
+func (s *Statistics) Upload() uint {
+	return s.bytesUploadedPerUpdate
+}
+
+func (s *Statistics) Download() uint {
+	return s.bytesDownloadedPerUpdate
 }

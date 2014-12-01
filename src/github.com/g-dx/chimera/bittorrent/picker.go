@@ -18,7 +18,7 @@ type ByDownloadSpeed []*Peer
 func (b ByDownloadSpeed) Len() int      { return len(b) }
 func (b ByDownloadSpeed) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
 func (b ByDownloadSpeed) Less(i, j int) bool {
-	return b[i].Statistics().bytesDownloadedPerUpdate < b[j].Statistics().bytesDownloadedPerUpdate
+	return b[i].Stats().bytesDownloadedPerUpdate < b[j].Stats().bytesDownloadedPerUpdate
 }
 
 type ByPriority []*Piece
@@ -33,7 +33,7 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap) bool {
 
 	// Update counters
 	for _, p := range peers {
-		p.Statistics().Update()
+		p.Stats().Update()
 	}
 
 	// Sort into fastest downloaders

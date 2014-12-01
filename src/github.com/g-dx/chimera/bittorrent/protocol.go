@@ -34,6 +34,7 @@ type ProtocolHandler struct {
 	logger           *log.Logger
 	peerMsgs         chan ProtocolMessage
 	peerErrors       chan PeerError
+	isSeed           bool
 }
 
 func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*ProtocolHandler, error) {
@@ -60,6 +61,7 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 		logger:           logger,
 		peerMsgs:         make(chan ProtocolMessage, 100),
 		peerErrors:       make(chan PeerError),
+		isSeed:           false,
 	}
 
 	// Start loop & return
@@ -163,7 +165,7 @@ func (ph *ProtocolHandler) onHeartbeat(heartbeat int64) {
 
 	// Run choking algorithm
 	if heartbeat%chokeInterval == 0 {
-		ChokePeers(ph.peers, heartbeat%optimisticChokeInterval == 0)
+		ChokePeers(ph.isSeed, ph.peers, heartbeat%optimisticChokeInterval == 0)
 	}
 
 	// Run piece picking algorithm
