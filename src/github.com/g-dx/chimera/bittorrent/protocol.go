@@ -9,7 +9,12 @@ import (
 
 var (
 	FIFTY_MILLISECONDS = 50 * time.Millisecond
-	idealPeers         = 25
+)
+
+const (
+	chokeInterval           = 10
+	optimisticChokeInterval = 30
+	idealPeers              = 25
 )
 
 type PeerConnectResult struct {
@@ -157,8 +162,8 @@ func (ph *ProtocolHandler) onHeartbeat(heartbeat int64) {
 	// TODO: Check all peer queues for expired requests
 
 	// Run choking algorithm
-	if heartbeat%10 == 0 {
-		// Run choker
+	if heartbeat%chokeInterval == 0 {
+		ChokePeers(ph.peers, heartbeat%optimisticChokeInterval == 0)
 	}
 
 	// Run piece picking algorithm

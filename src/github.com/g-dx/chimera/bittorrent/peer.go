@@ -17,8 +17,8 @@ const (
 // ----------------------------------------------------------------------------------
 
 type PeerState struct {
-	remoteChoke, localChoke, remoteInterest, localInterest bool
-	bitfield                                               *BitSet
+	remoteChoke, localChoke, remoteInterest, localInterest, optimistic, new bool
+	bitfield                                                                *BitSet
 }
 
 func NewPeerState(bits *BitSet) PeerState {
@@ -27,6 +27,8 @@ func NewPeerState(bits *BitSet) PeerState {
 		localChoke:     true,
 		remoteInterest: false,
 		localInterest:  false,
+		optimistic:     false,
+		new:            true,
 		bitfield:       bits,
 	}
 }
@@ -217,13 +219,25 @@ func (p *Peer) Choke(snubbed bool) error {
 }
 
 func (p *Peer) UnChoke(optimistic bool) error {
-	// TODO: Mark so that the choker knows
+	p.state.optimistic = optimistic
+	p.state.new = false
 	return p.Add(Unchoke(p.id))
 }
 
-func (p *Peer) IsOptimisticUnChoke() bool {
-	// TODO: Fix me!
-	return false
+func (p *Peer) IsInterested() bool {
+	return p.state.remoteInterest
+}
+
+func (p *Peer) IsChoked() bool {
+	return p.state.remoteChoke
+}
+
+func (p *Peer) IsOptimistic() bool {
+	return p.state.optimistic
+}
+
+func (p *Peer) IsNew() bool {
+	return p.state.new
 }
 
 func (p *Peer) Cancel(index, begin, len uint32) error {
