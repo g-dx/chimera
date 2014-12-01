@@ -11,52 +11,42 @@ const (
 
 func ChokePeers(peers []*Peer, optimistic bool) {
 
-	// 1. Unchoke 4 peers I get best download rate from & who are interested in me (downloaders)
-	// 2. Unchoke peers who have *better* upload rates but *aren't* interested in me
-	// 3. If file is complete use my upload rate to them to decide
-	// 4. Optimistic peer rotates every 30 secs. If they are interested they count as 1
-	//    of the 4 downloaders
-
-	downloaders := 0
+        // Build a list of candidate optimistic unchokes plus the current optimistic 
+        // unchoke. Randomly select one unchoke it. If it's interested it counts as 
+        // a downloader
+	n := 0
 	if optimistic {
-
-		// Get optimistic candidates, choose one and
-		can, old := candidateOptimistics(peers)
-		new := can[rand.Intn(len(can))]
+		candidates, old := candidateOptimistics(peers)
+		new := candidates[rand.Intn(len(candidates))]
+		new.UnChoke(true)
+		if new.IsInterested() {
+			n++
+		}
+		
+		// There may be no previous optimistic
 		if old != nil {
 			old.Choke(false)
 		}
-		new.UnChoke(true)
-
-		// If optimistic is interested counts as a downloader
-		if new.IsInterested() {
-			downloaders++
-		}
 	}
-
-	// Order all peers by download rate
+	
+	// Order all peers by download rate. Iterate from fastest to slowest unchoking all peers and
+	// counting the interested ones as downloaders. When we have 4 downloaders choke the remaining
+	// peers who are unchoked
 	sort.Sort(ByDownloadSpeed(peers))
-
-	// Unchoke all choked peers with best download rate to me who are
-	// interested (up to 4) or uninterested
-	remaining := 0
+	chokeRemaining := false
 	for i, p := range peers {
+	        if !p.IsChoked() && chokeRemaining {
+	        	p.Choke(false)
+	        	continue
+	        }
 		if p.IsChoked() {
 			p.UnChoke(false)
 		}
 		if p.IsInterested() {
-			downloaders++
-			if downloaders == downloadersSize {
-				remaining = i
-				break
+			n++
+			if n == downloadersSize {
+				chokeRemaining = true
 			}
-		}
-	}
-
-	// All remaining unchoked peers get choked
-	for i := remaining; i < len(peers); i++ {
-		if !peers[i].IsChoked() {
-			peers[i].Choke(false)
 		}
 	}
 }
