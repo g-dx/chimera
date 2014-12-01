@@ -9,6 +9,8 @@ const (
 	maxDownloaders = 4
 )
 
+var random = rand.New(rand.NewSource(1))
+
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // ByTransferSpeed compares
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -41,7 +43,7 @@ func ChokePeers(isSeed bool, peers []*Peer, optimistic bool) {
 	n := 0
 	if optimistic {
 		candidates, old := optimisticCandidates(peers)
-		new := candidates[rand.Intn(len(candidates))]
+		new := candidates[random.Intn(len(candidates))]
 		new.UnChoke(true)
 		if new.IsInterested() {
 			n++
