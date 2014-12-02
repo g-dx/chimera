@@ -85,8 +85,9 @@ func QueryTracker(req *TrackerRequest) (trp *TrackerResponse, err error) {
 
 type urlBuilder map[string]string
 
-func (b urlBuilder) Add(key string, val string) {
+func (b urlBuilder) Add(key string, val string) urlBuilder {
 	b[key] = val
+	return b
 }
 
 func (b urlBuilder) Build(base string) string {

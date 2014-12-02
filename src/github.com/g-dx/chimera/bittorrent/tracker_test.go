@@ -11,16 +11,17 @@ import (
 func TestUrlBuilder(t *testing.T) {
 
 	// Test basic concatenation
-	b := make(urlBuilder)
-	b.Add("key1", "value1")
-	url := b.Build("http://www.example.com/path1/path2")
+	url := make(urlBuilder).Add("key1", "value1").Build("http://www.example.com/path1/path2")
 	stringEquals(t, "http://www.example.com/path1/path2?key1=value1", url)
 
+	// Test leading slash
+	url = make(urlBuilder).Add("key1", "value1").Build("http://www.example.com/")
+	stringEquals(t, "http://www.example.com?key1=value1", url)
+
 	// Test URL escaping works correctly
-	b = make(urlBuilder)
-	b.Add("kéy1", "value 1")
-	url = b.Build("http://www.example.com/")
+	url = make(urlBuilder).Add("kéy1", "value 1").Build("http://www.example.com/")
 	stringEquals(t, "http://www.example.com?k%C3%A9y1=value+1", url)
+
 }
 
 func TestTrackerFailure(t *testing.T) {
