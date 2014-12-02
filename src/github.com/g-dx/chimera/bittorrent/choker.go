@@ -48,28 +48,17 @@ func (b ByTransferSpeed) Less(i, j int) bool {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-func ChokePeers(isSeed bool, peers []*Peer, selectOpt bool) {
+func ChokePeers(isSeed bool, peers []*Peer, isOptimistic bool) {
 	if len(peers) == 0 {
 		return
 	}
 
-	// Build a list of candidate optimistic unchokes plus the current optimistic
-	// unchoke. Randomly select one & unchoke it. If it's interested it counts as
-	// a downloader
+	// Attempt to set a new optimistic peer. If it's interested it counts as a downloader
 	n := 0
-	if selectOpt {
-		candidates, old := optCandidates(peers)
-		if len(candidates) > 0 {
-			new := candidates[random.Intn(len(candidates))]
-			new.UnChoke(true)
-			if new.IsInterested() {
-				n++
-			}
-		}
-
-		// There may be no previous optimistic unchoke
-		if old != nil {
-			old.ClearOptimistic()
+	if isOptimistic {
+		p := rotateOptimistic(peers)
+		if p != nil && p.IsInterested() {
+			n++
 		}
 	}
 
@@ -105,14 +94,32 @@ func ChokePeers(isSeed bool, peers []*Peer, selectOpt bool) {
 	}
 }
 
-// Create the list of candidate optimistic unchoke peers. Also return
-func optCandidates(peers []*Peer) ([]*Peer, *Peer) {
+func rotateOptimistic(peers []*Peer) *Peer {
 
-	var opt *Peer
+	var new *Peer
+	c, old := buildCandidates(peers)
+	if len(c) > 0 {
+		new = c[random.Intn(len(c))]
+		new.UnChoke(true)
+
+		// There may be no previous optimistic unchoke
+		if old != nil {
+			old.ClearOptimistic()
+		}
+	} else if old != nil {
+		new = old
+	}
+	return new
+}
+
+// Create the list of candidate optimistic unchoke peers. Also return
+func buildCandidates(peers []*Peer) ([]*Peer, *Peer) {
+
+	var cur *Peer
 	c := make([]*Peer, 0, len(peers))
 	for _, p := range peers {
 		if p.IsOptimistic() {
-			opt = p
+			cur = p
 		}
 
 		// Newly connected peers 3x more likely to start
@@ -123,5 +130,5 @@ func optCandidates(peers []*Peer) ([]*Peer, *Peer) {
 			}
 		}
 	}
-	return c, opt
+	return c, cur
 }

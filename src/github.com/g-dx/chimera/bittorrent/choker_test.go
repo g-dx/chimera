@@ -8,20 +8,20 @@ import (
 	"testing"
 )
 
-func TestOptimisticCandidates(t *testing.T) {
+func TestBuildCandidatesGivenNewPeers(t *testing.T) {
 
 	p1 := p1()
 	p2 := p2()
 	peers := asList(p1, p2)
 
-	c, opt := optCandidates(peers)
+	c, opt := buildCandidates(peers)
 	intEquals(t, 6, len(c))
 	// TODO: Check opt == nil
 
 	// Set optimistic
 	p1.UnChoke(true)
 
-	c, opt = optCandidates(peers)
+	c, opt = buildCandidates(peers)
 	intEquals(t, 3, len(c))
 	stringEquals(t, p1.Id().String(), opt.Id().String())
 	stringEquals(t, p2.Id().String(), c[0].Id().String())
@@ -32,7 +32,7 @@ func TestOptimisticCandidates(t *testing.T) {
 	// TODO: This isn't great
 	p1.Choke()
 	p1.ClearOptimistic()
-	c, opt = optCandidates(peers)
+	c, opt = buildCandidates(peers)
 	intEquals(t, 4, len(c))
 	// TODO: Check opt == nil
 }
@@ -45,12 +45,44 @@ func TestChokePeersGivenNoPeers(t *testing.T) {
 	ChokePeers(true, make([]*Peer, 0), true)
 }
 
+func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T) {
+
+	p1 := p1()
+	p2 := p2()
+	peers := asList(p1, p2)
+
+	// Set optimistic and unchoked
+	p1.UnChoke(true)
+	p2.UnChoke(false)
+
+	// Run choker & check optimistic has *not* changed
+	ChokePeers(false, peers, true)
+	boolEquals(t, true, p1.IsOptimistic())
+	boolEquals(t, false, p2.IsOptimistic())
+}
+
+func TestChokePeersGivenNoOptimisticCandidatesAndNoOptimistic(t *testing.T) {
+
+	p1 := p1()
+	p2 := p2()
+	peers := asList(p1, p2)
+
+	// Set both unchoke
+	p1.UnChoke(false)
+	p2.UnChoke(false)
+
+	// Run choker & check no optimistic
+	ChokePeers(false, peers, true)
+	boolEquals(t, false, p1.IsOptimistic())
+	boolEquals(t, false, p2.IsOptimistic())
+}
+
 func TestChokePeersGivenNoInterestedPeers(t *testing.T) {
 
 	p1 := p1()
 	p2 := p2()
 	p3 := p3()
-	peers := asList(p1)
+	peers := asList(p1, p2, p3)
 
 	// Run choker
 	ChokePeers(false, peers, false)
