@@ -114,18 +114,18 @@ func errEquals(t *testing.T, a, b error) {
 
 func isNil(t *testing.T, a interface{}) {
 	if a != nil {
-		t.Fatalf(buildUnequalMessage(nil, a))
+		t.Fatalf(buildUnequalMessage(2, nil, a))
 	}
 }
 
 // Do not call this from outside this package!
 func unequalValue(t *testing.T, a, b interface{}) {
-	t.Errorf(buildUnequalMessage(a, b))
+	t.Errorf(buildUnequalMessage(3, a, b))
 }
 
 // Do not call this from outside this package!
-func buildUnequalMessage(a, b interface{}) string {
-	_, file, line, _ := runtime.Caller(3)
+func buildUnequalMessage(depth int, a, b interface{}) string {
+	_, file, line, _ := runtime.Caller(depth)
 	return fmt.Sprintf("\nFile    : %v:%v\nExpected: %v\nActual  : %v",
 		file[strings.LastIndex(file, "/")+1:len(file)], line, a, b)
 }

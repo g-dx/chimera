@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	maxDownloaders = 4
+	uploadSlots = 4
 )
 
 var random = rand.New(rand.NewSource(1))
@@ -15,91 +15,113 @@ var random = rand.New(rand.NewSource(1))
 // ByTransferSpeed compares
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
+type Peers []*Peer
+
+func (p Peers) Len() int      { return len(p) }
+func (p Peers) Swap(i, j int) { p[i], p[j] = p[j], p[i] }
+
 type ByTransferSpeed struct {
-	[]*Peer
+	Peers
 	isSeed bool
 }
 
-func (b ByTransferSpeed) Len() int      { return len(b) }
-func (b ByTransferSpeed) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
 func (b ByTransferSpeed) Less(i, j int) bool {
-	// If seed use upload speed otherwise use download
+	irate := b.Peers[i].Stats().Download()
+	jrate := b.Peers[j].Stats().Download()
 	if b.isSeed {
-		return b[i].Stats().Upload() < b[j].Stats().Upload()
+		irate = b.Peers[i].Stats().Upload()
+		jrate = b.Peers[j].Stats().Upload()
 	}
-	return b[i].Stats().Download() < b[j].Stats().Download()
+
+	// Check speeds then interest state
+	if irate > jrate {
+		return true
+	}
+	if irate < jrate {
+		return false
+	}
+	if b.Peers[i].IsInterested() {
+		return true
+	}
+	return false
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-func ChokePeers(isSeed bool, peers []*Peer, optimistic bool) {
+func ChokePeers(isSeed bool, peers []*Peer, selectOpt bool) {
 	if len(peers) == 0 {
 		return
 	}
 
-    // Build a list of candidate optimistic unchokes plus the current optimistic
-    // unchoke. Randomly select one unchoke it. If it's interested it counts as
-    // a downloader
+	// Build a list of candidate optimistic unchokes plus the current optimistic
+	// unchoke. Randomly select one & unchoke it. If it's interested it counts as
+	// a downloader
 	n := 0
-	if optimistic {
-		candidates, old := optimisticCandidates(peers)
-		new := candidates[random.Intn(len(candidates))]
-		new.UnChoke(true)
-		if new.IsInterested() {
-			n++
+	if selectOpt {
+		candidates, old := optCandidates(peers)
+		if len(candidates) > 0 {
+			new := candidates[random.Intn(len(candidates))]
+			new.UnChoke(true)
+			if new.IsInterested() {
+				n++
+			}
 		}
-		
-		// There may be no previous optimistic
+
+		// There may be no previous optimistic unchoke
 		if old != nil {
-			old.Choke(false)
+			old.ClearOptimistic()
 		}
 	}
-	
+
 	// Order all peers by download or uploaded rate if we are a seed. Iterate from fastest to
-	// slowest unchoking all peers and counting the interested ones as downloaders. When we
-	// have 4 downloaders choke the remaining peers who are unchoked
-	sort.Sort(&ByTransferSpeed { peers, isSeed })
-	chokeRemaining := false
-	for _, p := range peers {
+	// slowest counting the interested ones until we have filled our upload slots.
+	sort.Sort(ByTransferSpeed{peers, isSeed})
+	pos := -1
+	for i, p := range peers {
 		if p.IsOptimistic() {
 			continue
 		}
-	    if !p.IsChoked() && chokeRemaining {
-	    	p.Choke(false)
-	    	continue
-		}
-		if p.IsChoked() {
-			p.UnChoke(false)
-		}
 		if p.IsInterested() {
 			n++
-			if n == maxDownloaders {
-				chokeRemaining = true
-			}
+			pos = i
+		}
+		if n == uploadSlots {
+			break
+		}
+	}
+
+	// Iterate over peers and perform chokes & unchokes based on the position of the slowest
+	// peer to unchoke. Take care to not change the optimistic unchoke.
+	for i, p := range peers {
+		if p.IsOptimistic() {
+			continue
+		}
+		if i <= pos && p.IsChoked() {
+			p.UnChoke(false)
+		}
+		if i > pos && !p.IsChoked() {
+			p.Choke()
 		}
 	}
 }
 
 // Create the list of candidate optimistic unchoke peers. Also return
-func optimisticCandidates(peers []*Peer) ([]*Peer, *Peer) {
+func optCandidates(peers []*Peer) ([]*Peer, *Peer) {
 
-	var p *Peer
-	c := make([]*Peer, len(peers))
-
-	for _, peer := range peers {
-
-		// Mark current optimistic
-		if peer.IsOptimistic() {
-			p = peer
+	var opt *Peer
+	c := make([]*Peer, 0, len(peers))
+	for _, p := range peers {
+		if p.IsOptimistic() {
+			opt = p
 		}
 
 		// Newly connected peers 3x more likely to start
 		if p.IsChoked() {
-			c = append(c, peer)
-			if peer.IsNew() {
-				c = append(c, peer, peer)
+			c = append(c, p)
+			if p.IsNew() {
+				c = append(c, p, p)
 			}
 		}
 	}
-	return c, p
+	return c, opt
 }

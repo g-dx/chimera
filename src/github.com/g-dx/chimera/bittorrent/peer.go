@@ -57,14 +57,14 @@ type Peer struct {
 
 func NewPeer(id *PeerIdentity,
 	queue *PeerQueue,
-	mi *MetaInfo,
+	pieceCount uint32,
 	pieceMap *PieceMap,
 	logger *log.Logger) *Peer {
 
 	return &Peer{
 		id:         id,
 		pieceMap:   pieceMap,
-		state:      NewPeerState(NewBitSet(uint32(len(mi.Hashes)))),
+		state:      NewPeerState(NewBitSet(pieceCount)),
 		logger:     logger,
 		statistics: &Statistics{},
 		queue:      queue,
@@ -213,14 +213,15 @@ func (p *Peer) CanDownload() bool {
 	return !p.state.localChoke && p.state.localInterest
 }
 
-func (p *Peer) Choke(snubbed bool) error {
-	// TODO: Mark so that the choker knows
+func (p *Peer) Choke() error {
+	p.state.remoteChoke = true
 	return p.Add(Choke(p.id))
 }
 
 func (p *Peer) UnChoke(optimistic bool) error {
 	p.state.optimistic = optimistic
 	p.state.new = false
+	p.state.remoteChoke = false
 	return p.Add(Unchoke(p.id))
 }
 
@@ -234,6 +235,10 @@ func (p *Peer) IsChoked() bool {
 
 func (p *Peer) IsOptimistic() bool {
 	return p.state.optimistic
+}
+
+func (p *Peer) ClearOptimistic() {
+	p.state.optimistic = false
 }
 
 func (p *Peer) IsNew() bool {

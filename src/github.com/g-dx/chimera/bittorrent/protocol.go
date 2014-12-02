@@ -135,7 +135,7 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 
 	// Connected
 	ph.logger.Printf("New Peer: %v\n", id)
-	ph.newPeers <- NewPeer(id, NewQueue(in), ph.metaInfo, ph.pieceMap, ph.logger)
+	ph.newPeers <- NewPeer(id, NewQueue(in), uint32(len(ph.metaInfo.Hashes)), ph.pieceMap, ph.logger)
 }
 
 func (ph *ProtocolHandler) onPeerMessage(msg ProtocolMessage) {
