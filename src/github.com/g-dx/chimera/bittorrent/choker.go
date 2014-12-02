@@ -96,20 +96,16 @@ func ChokePeers(isSeed bool, peers []*Peer, isOptimistic bool) {
 
 func rotateOptimistic(peers []*Peer) *Peer {
 
-	var new *Peer
-	c, old := buildCandidates(peers)
+	c, cur := buildCandidates(peers)
 	if len(c) > 0 {
-		new = c[random.Intn(len(c))]
+		new := c[random.Intn(len(c))]
 		new.UnChoke(true)
-
-		// There may be no previous optimistic unchoke
-		if old != nil {
-			old.ClearOptimistic()
+		if cur != nil {
+			cur.ClearOptimistic()
 		}
-	} else if old != nil {
-		new = old
+		cur = new
 	}
-	return new
+	return cur
 }
 
 // Create the list of candidate optimistic unchoke peers. Also return
