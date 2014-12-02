@@ -1,10 +1,10 @@
 package bittorrent
 
 import (
-	"runtime"
 	"errors"
-	"io"
 	"github.com/g-dx/chimera/bencode"
+	"io"
+	"runtime"
 )
 
 const (
@@ -37,18 +37,18 @@ var (
 
 type MetaInfo struct {
 	Announce, Comment, CreatedBy, Encoding string
-	CreationDate uint64
-	PieceLength  uint32
-	Hashes       [][]byte
-	Private      bool
-	Files        []MetaInfoFile
-	InfoHash     []byte
+	CreationDate                           uint64
+	PieceLength                            uint32
+	Hashes                                 [][]byte
+	Private                                bool
+	Files                                  []MetaInfoFile
+	InfoHash                               []byte
 }
 
 type MetaInfoFile struct {
 	Path, Name string
-	Length   uint64
-	CheckSum []byte
+	Length     uint64
+	CheckSum   []byte
 }
 
 // Returns the total length of file data. In multi-file mode this is the
@@ -80,19 +80,19 @@ func NewMetaInfo(r io.Reader) (mi *MetaInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Build meta info
-	mi = &MetaInfo {
-		Announce		: bs(bdata, announce),
-		CreationDate	: uint64(optI(bdata, creationDate)),
-		Comment:      	optBs(bdata, comment),
-		CreatedBy:      optBs(bdata, createdBy),
-		Encoding:		optBs(bdata, encoding),
-		PieceLength:	uint32(i(d(bdata, info), pieceLength)),
-		Hashes:			toSha1Hashes(bs(d(bdata, info), pieces)),
-		Private:		optI(d(bdata, info), private) != 0,
-		Files:			toMetaInfoFiles(d(bdata, info)),
-		InfoHash:		[]byte(bs(bdata, infoHash)),
+	mi = &MetaInfo{
+		Announce:     bs(bdata, announce),
+		CreationDate: uint64(optI(bdata, creationDate)),
+		Comment:      optBs(bdata, comment),
+		CreatedBy:    optBs(bdata, createdBy),
+		Encoding:     optBs(bdata, encoding),
+		PieceLength:  uint32(i(d(bdata, info), pieceLength)),
+		Hashes:       toSha1Hashes(bs(d(bdata, info), pieces)),
+		Private:      optI(d(bdata, info), private) != 0,
+		Files:        toMetaInfoFiles(d(bdata, info)),
+		InfoHash:     []byte(bs(bdata, infoHash)),
 	}
 
 	return mi, nil
@@ -106,10 +106,10 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 	// Single-file mode
 	if files == nil {
 		return []MetaInfoFile{
-			MetaInfoFile {
-				Path:      "/",
-				Name:      name,
-				Length:    uint64(i(info, length)),
+			MetaInfoFile{
+				Path:     "/",
+				Name:     name,
+				Length:   uint64(i(info, length)),
 				CheckSum: []byte(optBs(info, md5sum)),
 			}}
 	}
@@ -122,10 +122,10 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 		miFile := entry.(map[string]interface{})
 		path := l(miFile, path)
 		miFiles = append(miFiles,
-			MetaInfoFile {
-				Path:      name + "/" + joinAsStrings(path[:len(path)-1], "/"),
-				Name:      path[len(path)-1].(string),
-				Length:    uint64(i(miFile, length)),
+			MetaInfoFile{
+				Path:     name + "/" + joinAsStrings(path[:len(path)-1], "/"),
+				Name:     path[len(path)-1].(string),
+				Length:   uint64(i(miFile, length)),
 				CheckSum: []byte(optBs(miFile, md5sum)),
 			})
 	}
@@ -136,7 +136,7 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 func toSha1Hashes(pieces string) [][]byte {
 
 	// Check format/length
-	if len(pieces) % sha1Length != 0 {
+	if len(pieces)%sha1Length != 0 {
 		panic(errPiecesValueMalformed)
 	}
 
@@ -149,7 +149,7 @@ func toSha1Hashes(pieces string) [][]byte {
 	return hashes
 }
 
-func joinAsStrings(list []interface {}, separator string) string {
+func joinAsStrings(list []interface{}, separator string) string {
 	buf := ""
 	for _, s := range list {
 		buf += s.(string) + separator
