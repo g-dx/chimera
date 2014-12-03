@@ -18,7 +18,7 @@ type ByDownloadSpeed []*Peer
 func (b ByDownloadSpeed) Len() int      { return len(b) }
 func (b ByDownloadSpeed) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
 func (b ByDownloadSpeed) Less(i, j int) bool {
-	return b[i].Stats().bytesDownloadedPerUpdate < b[j].Stats().bytesDownloadedPerUpdate
+	return b[i].Stats().Download.Rate() < b[j].Stats().Download.Rate()
 }
 
 type ByPriority []*Piece

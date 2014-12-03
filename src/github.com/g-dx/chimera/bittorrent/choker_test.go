@@ -14,16 +14,16 @@ func TestBuildCandidatesGivenNewPeers(t *testing.T) {
 	p2 := p2()
 	peers := asList(p1, p2)
 
-	c, opt := buildCandidates(peers)
+	c, cur := buildCandidates(peers)
 	intEquals(t, 6, len(c))
-	// TODO: Check opt == nil
+	// TODO: Check cur == nil
 
 	// Set optimistic
 	p1.UnChoke(true)
 
-	c, opt = buildCandidates(peers)
+	c, cur = buildCandidates(peers)
 	intEquals(t, 3, len(c))
-	stringEquals(t, p1.Id().String(), opt.Id().String())
+	stringEquals(t, p1.Id().String(), cur.Id().String())
 	stringEquals(t, p2.Id().String(), c[0].Id().String())
 	stringEquals(t, p2.Id().String(), c[1].Id().String())
 	stringEquals(t, p2.Id().String(), c[2].Id().String())
@@ -32,17 +32,15 @@ func TestBuildCandidatesGivenNewPeers(t *testing.T) {
 	// TODO: This isn't great
 	p1.Choke()
 	p1.ClearOptimistic()
-	c, opt = buildCandidates(peers)
+	c, cur = buildCandidates(peers)
 	intEquals(t, 4, len(c))
-	// TODO: Check opt == nil
+	// TODO: Check cur == nil
 }
 
 func TestChokePeersGivenNoPeers(t *testing.T) {
-	ChokePeers(false, make([]*Peer, 0), false)
-	ChokePeers(false, make([]*Peer, 0), true)
-	ChokePeers(true, make([]*Peer, 0), false)
-	ChokePeers(false, make([]*Peer, 0), true)
-	ChokePeers(true, make([]*Peer, 0), true)
+	peers := asList()
+	ChokePeers(false, peers, false)
+	intEquals(t, 0, len(peers))
 }
 
 func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T) {
@@ -57,6 +55,8 @@ func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T
 
 	// Run choker & check optimistic has *not* changed
 	ChokePeers(false, peers, true)
+	assertUnchoked(t, p1)
+	assertChoked(t, p2)
 	boolEquals(t, true, p1.IsOptimistic())
 	boolEquals(t, false, p2.IsOptimistic())
 }
@@ -73,6 +73,7 @@ func TestChokePeersGivenNoOptimisticCandidatesAndNoOptimistic(t *testing.T) {
 
 	// Run choker & check no optimistic
 	ChokePeers(false, peers, true)
+	assertChoked(t, p1, p2)
 	boolEquals(t, false, p1.IsOptimistic())
 	boolEquals(t, false, p2.IsOptimistic())
 }
@@ -208,13 +209,13 @@ func (tp *TestPeer) uninterested() *TestPeer {
 	return tp
 }
 
-func (tp *TestPeer) dl(rate uint) *TestPeer {
-	tp.Stats().bytesDownloadedPerUpdate = rate
+func (tp *TestPeer) dl(rate int) *TestPeer {
+	tp.Stats().Download.rate = rate
 	return tp
 }
 
-func (tp *TestPeer) ul(rate uint) *TestPeer {
-	tp.Stats().bytesUploadedPerUpdate = rate
+func (tp *TestPeer) ul(rate int) *TestPeer {
+	tp.Stats().Upload.rate = rate
 	return tp
 }
 

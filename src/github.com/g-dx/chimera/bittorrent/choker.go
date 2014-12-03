@@ -26,11 +26,11 @@ type ByTransferSpeed struct {
 }
 
 func (b ByTransferSpeed) Less(i, j int) bool {
-	irate := b.Peers[i].Stats().Download()
-	jrate := b.Peers[j].Stats().Download()
+	irate := b.Peers[i].Stats().Download.Rate()
+	jrate := b.Peers[j].Stats().Download.Rate()
 	if b.isSeed {
-		irate = b.Peers[i].Stats().Upload()
-		jrate = b.Peers[j].Stats().Upload()
+		irate = b.Peers[i].Stats().Upload.Rate()
+		jrate = b.Peers[j].Stats().Upload.Rate()
 	}
 
 	// Check speeds then interest state
@@ -48,15 +48,15 @@ func (b ByTransferSpeed) Less(i, j int) bool {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-func ChokePeers(isSeed bool, peers []*Peer, isOptimistic bool) {
+func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) {
 	if len(peers) == 0 {
 		return
 	}
 
 	// Attempt to set a new optimistic peer. If it's interested it counts as a downloader
 	n := 0
-	if isOptimistic {
-		p := rotateOptimistic(peers)
+	if changeOptimistic {
+		p := maybeChangeOptimistic(peers)
 		if p != nil && p.IsInterested() {
 			n++
 		}
@@ -94,7 +94,7 @@ func ChokePeers(isSeed bool, peers []*Peer, isOptimistic bool) {
 	}
 }
 
-func rotateOptimistic(peers []*Peer) *Peer {
+func maybeChangeOptimistic(peers []*Peer) *Peer {
 
 	c, cur := buildCandidates(peers)
 	if len(c) > 0 {

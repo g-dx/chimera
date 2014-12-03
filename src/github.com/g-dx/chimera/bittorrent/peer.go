@@ -17,8 +17,13 @@ const (
 // ----------------------------------------------------------------------------------
 
 type PeerState struct {
-	remoteChoke, localChoke, remoteInterest, localInterest, optimistic, new bool
-	bitfield                                                                *BitSet
+	remoteChoke,
+	localChoke,
+	remoteInterest,
+	localInterest,
+	optimistic,
+	new bool
+	bitfield *BitSet
 }
 
 func NewPeerState(bits *BitSet) PeerState {
@@ -66,7 +71,7 @@ func NewPeer(id *PeerIdentity,
 		pieceMap:   pieceMap,
 		state:      NewPeerState(NewBitSet(pieceCount)),
 		logger:     logger,
-		statistics: &Statistics{},
+		statistics: NewStatistics(),
 		queue:      queue,
 	}
 }
@@ -158,7 +163,7 @@ func (p *Peer) onRequest(index, begin, length uint32) error {
 func (p *Peer) onBlock(index, begin uint32, block []byte) error {
 	// NOTE: Already on the way to disk...
 	// p.disk.Write(index, begin, length, p.id)
-	p.Stats().Downloaded(uint(len(block)))
+	p.Stats().Download.Add(len(block))
 	return nil
 }
 
@@ -258,46 +263,49 @@ func (p *Peer) Add(pm ProtocolMessage) error {
 // ----------------------------------------------------------------------------------
 
 type Statistics struct {
-	totalBytesDownloaded     uint64
-	bytesDownloadedPerUpdate uint
-	bytesDownloaded          uint
+	Download *Counter
+	Upload   *Counter
+	Written  *Counter
+	all      []*Counter
+}
 
-	totalBytesUploaded     uint64
-	bytesUploadedPerUpdate uint
-	bytesUploaded          uint
-
-	totalBytesWritten     uint64
-	bytesWrittenPerUpdate uint
-	bytesWritten          uint
+func NewStatistics() *Statistics {
+	d := &Counter{}
+	u := &Counter{}
+	w := &Counter{}
+	return &Statistics{d, u, w, append(make([]*Counter, 0, 3), d, u, w)}
 }
 
 func (s *Statistics) Update() {
-
-	// Update & reset
-	s.bytesDownloadedPerUpdate = s.bytesDownloaded
-	s.bytesDownloaded = 0
-	s.bytesUploadedPerUpdate = s.bytesUploaded
-	s.bytesUploaded = 0
-	s.bytesWrittenPerUpdate = s.bytesWritten
-	s.bytesWritten = 0
+	for _, c := range s.all {
+		c.Update()
+	}
 }
 
-func (s *Statistics) Uploaded(n uint) {
-	s.bytesUploaded += n
+// ----------------------------------------------------------------------------------
+// Counter
+// ----------------------------------------------------------------------------------
+
+type Counter struct {
+	total int64
+	rate  int
+	n     int
 }
 
-func (s *Statistics) Downloaded(n uint) {
-	s.bytesDownloaded += n
+func (s *Counter) Rate() int {
+	return s.rate
 }
 
-func (s *Statistics) Written(n uint) {
-	s.bytesWritten += n
+func (s *Counter) Total() int64 {
+	return s.total
 }
 
-func (s *Statistics) Upload() uint {
-	return s.bytesUploadedPerUpdate
+func (s *Counter) Add(n int) {
+	s.n += n
 }
 
-func (s *Statistics) Download() uint {
-	return s.bytesDownloadedPerUpdate
+func (s *Counter) Update() {
+	s.rate = s.n
+	s.total += int64(s.rate)
+	s.n = 0
 }
