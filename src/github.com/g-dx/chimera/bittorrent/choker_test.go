@@ -8,6 +8,31 @@ import (
 	"testing"
 )
 
+func BenchmarkChokePeers10(b *testing.B) {
+
+	// Build a collection of peers in different states
+	p1 := p1().dl(1)
+	p2 := p2().dl(2).interested()
+	p3 := p3()
+	p4 := p4().dl(4).interested()
+	p5 := p5().dl(5)
+	p6 := p6()
+	p7 := p7().dl(7).interested()
+	p8 := p8().dl(8)
+	p9 := p9().dl(9).interested()
+	p10 := p10().dl(10).interested()
+
+	// Unchoke a few
+	p1.UnChoke(true)
+	p6.UnChoke(false)
+	p8.UnChoke(false)
+
+	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
+	for i := 0; i < b.N; i++ {
+		ChokePeers(false, peers, true)
+	}
+}
+
 func TestBuildCandidatesGivenNewPeers(t *testing.T) {
 
 	p1 := p1()
@@ -201,6 +226,7 @@ type TestPeer struct {
 
 func (tp *TestPeer) interested() *TestPeer {
 	tp.state.remoteInterest = true
+	tp.state.new = false
 	return tp
 }
 
@@ -211,11 +237,13 @@ func (tp *TestPeer) uninterested() *TestPeer {
 
 func (tp *TestPeer) dl(rate int) *TestPeer {
 	tp.Stats().Download.rate = rate
+	tp.state.new = false
 	return tp
 }
 
 func (tp *TestPeer) ul(rate int) *TestPeer {
 	tp.Stats().Upload.rate = rate
+	tp.state.new = false
 	return tp
 }
 
@@ -245,11 +273,13 @@ func asList(tps ...*TestPeer) []*Peer {
 // Already named test peers
 //----------------------------------------------------
 
-func p1() *TestPeer { return pr(1) }
-func p2() *TestPeer { return pr(2) }
-func p3() *TestPeer { return pr(3) }
-func p4() *TestPeer { return pr(4) }
-func p5() *TestPeer { return pr(5) }
-func p6() *TestPeer { return pr(6) }
-func p7() *TestPeer { return pr(7) }
-func p8() *TestPeer { return pr(8) }
+func p1() *TestPeer  { return pr(1) }
+func p2() *TestPeer  { return pr(2) }
+func p3() *TestPeer  { return pr(3) }
+func p4() *TestPeer  { return pr(4) }
+func p5() *TestPeer  { return pr(5) }
+func p6() *TestPeer  { return pr(6) }
+func p7() *TestPeer  { return pr(7) }
+func p8() *TestPeer  { return pr(8) }
+func p9() *TestPeer  { return pr(9) }
+func p10() *TestPeer  { return pr(10) }
