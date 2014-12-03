@@ -98,12 +98,11 @@ func maybeChangeOptimistic(peers []*Peer) *Peer {
 
 	c, cur := buildCandidates(peers)
 	if len(c) > 0 {
-		new := c[random.Intn(len(c))]
-		new.UnChoke(true)
 		if cur != nil {
 			cur.ClearOptimistic()
 		}
-		cur = new
+		cur := c[random.Intn(len(c))]
+		cur.UnChoke(true)
 	}
 	return cur
 }
