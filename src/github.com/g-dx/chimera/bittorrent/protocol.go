@@ -76,13 +76,13 @@ func (ph *ProtocolHandler) AwaitDone() {
 
 func (ph *ProtocolHandler) loop() {
 
-	beat := int64(0)
+	tick := 0
 	for {
 
 		select {
 		case <-time.After(ONE_SECOND):
-			ph.onHeartbeat(beat)
-			beat++
+			ph.onTick(tick)
+			tick++
 
 		case r := <-ph.trackerResponses:
 			ph.onTrackerResponse(r)
@@ -159,13 +159,13 @@ func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
 	// 3. Log errors
 }
 
-func (ph *ProtocolHandler) onHeartbeat(heartbeat int64) {
+func (ph *ProtocolHandler) onTick(tick int) {
 
 	// TODO: Check all peer queues for expired requests
 
 	// Run choking algorithm
-	if heartbeat%chokeInterval == 0 {
-		ChokePeers(ph.isSeed, ph.peers, heartbeat%optimisticChokeInterval == 0)
+	if tick%chokeInterval == 0 {
+		ChokePeers(ph.isSeed, ph.peers, tick%optimisticChokeInterval == 0)
 	}
 
 	// Run piece picking algorithm

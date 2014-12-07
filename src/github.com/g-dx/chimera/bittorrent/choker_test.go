@@ -282,4 +282,4 @@ func p6() *TestPeer  { return pr(6) }
 func p7() *TestPeer  { return pr(7) }
 func p8() *TestPeer  { return pr(8) }
 func p9() *TestPeer  { return pr(9) }
-func p10() *TestPeer  { return pr(10) }
+func p10() *TestPeer { return pr(10) }
