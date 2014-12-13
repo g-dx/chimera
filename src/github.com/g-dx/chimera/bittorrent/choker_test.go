@@ -253,7 +253,7 @@ func (tp *TestPeer) asPeer() *Peer {
 
 func pr(i int) *TestPeer {
 	p := NewPeer(
-		&PeerIdentity{nil, strconv.Itoa(i)},
+		&PeerIdentity{[20]byte{}, strconv.Itoa(i)},
 		NewQueue(make(chan ProtocolMessage)),
 		1,
 		NewPieceMap(1, 1, 1),

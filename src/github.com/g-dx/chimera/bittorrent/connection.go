@@ -52,12 +52,12 @@ func (pe *PeerError) Id() *PeerIdentity {
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type PeerIdentity struct {
-	id      []byte // from handshake
-	address string // ip:port
+	id      [20]byte // from handshake
+	address string   // ip:port
 }
 
 func (pi *PeerIdentity) Equals(ip *PeerIdentity) bool {
-	return bytes.Equal(pi.id, ip.id) && pi.address == ip.address
+	return pi.id == ip.id && pi.address == ip.address
 }
 
 func (pi *PeerIdentity) String() string {
@@ -173,7 +173,9 @@ func (pc *PeerConnection) completeHandshake(outHandshake *HandshakeMessage) (pi 
 		return nil, errHashesNotEquals
 	}
 
-	return &PeerIdentity{inHandshake.infoHash, pc.in.conn.RemoteAddr().String()}, nil
+	id := &PeerIdentity{address: pc.in.conn.RemoteAddr().String()}
+	copy(id.id[:], inHandshake.infoHash)
+	return id, nil
 }
 
 func (pc *PeerConnection) Close() error {

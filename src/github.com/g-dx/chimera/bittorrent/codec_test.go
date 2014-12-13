@@ -35,7 +35,7 @@ func encodeTo(pm ProtocolMessage) []byte {
 func TestDecode(t *testing.T) {
 
 	buf := []byte{0, 0, 0, 0, 0, 0, 0, 1, 0}
-	id := &PeerIdentity{[]byte("unknown"), "addr"}
+	id := &PeerIdentity{[20]byte{}, "addr"}
 
 	remainingBuf, pm := Unmarshal(id, buf)
 	msgEquals(t, KeepAlive, pm)
