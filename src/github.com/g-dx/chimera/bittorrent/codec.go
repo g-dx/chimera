@@ -260,15 +260,15 @@ type BlockMessage struct {
 	block        []byte
 }
 
-func (m BlockMessage) Index() uint32 {
+func (m *BlockMessage) Index() uint32 {
 	return m.index
 }
 
-func (m BlockMessage) Begin() uint32 {
+func (m *BlockMessage) Begin() uint32 {
 	return m.begin
 }
 
-func (m BlockMessage) Block() []byte {
+func (m *BlockMessage) Block() []byte {
 	return m.block
 }
 
