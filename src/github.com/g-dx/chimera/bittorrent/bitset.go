@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-var bitMasks = [8]byte{1, 2, 4, 8, 16, 32, 64, 128}
+var bitMasks = [8]byte{128, 64, 32, 16, 8, 4, 2, 1}
 
 type BitSet struct {
 	bits     []byte
@@ -32,7 +32,7 @@ func NewBitSetFrom(bits []byte, size uint32) (*BitSet, error) {
 	// Ensure spare bits are not set
 	if i := uint32(size % 8); i != 0 {
 		for ; i < 8; i++ {
-			if bits[len(bits)-1]|bitMasks[i] != 0 {
+			if bits[len(bits)-1]&bitMasks[i] != 0 {
 				return nil, errSpareBitsSet
 			}
 		}
