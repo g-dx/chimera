@@ -35,6 +35,7 @@ type ProtocolHandler struct {
 	peerMsgs         chan ProtocolMessage
 	peerErrors       chan PeerError
 	isSeed           bool
+	requestTimer     *ProtocolRequestTimer
 }
 
 func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*ProtocolHandler, error) {
@@ -123,19 +124,25 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 		return
 	}
 
-	in := make(chan ProtocolMessage)
+	out := make(chan ProtocolMessage)
 
 	// Attempt to establish connection
-	id, err := conn.Establish(in, ph.peerMsgs, ph.peerErrors, Handshake(ph.metaInfo.InfoHash), ph.dir)
+	id, err := conn.Establish(out, ph.peerMsgs, ph.peerErrors, Handshake(ph.metaInfo.InfoHash), ph.dir)
 	if err != nil {
 		ph.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
 		conn.Close()
 		return
 	}
 
+	// Setup request handling
+	ph.requestTimer.CreateTimer(*id)
+	f := func(index, begin int) {
+		ph.requestTimer.AddBlock(*id, index, begin)
+	}
+
 	// Connected
 	ph.logger.Printf("New Peer: %v\n", id)
-	ph.newPeers <- NewPeer(id, NewQueue(in), uint32(len(ph.metaInfo.Hashes)), ph.pieceMap, ph.logger)
+	ph.newPeers <- NewPeer(id, NewQueue(out, f), ph.pieceMap, ph.logger)
 }
 
 func (ph *ProtocolHandler) onPeerMessage(msg ProtocolMessage) {
@@ -159,17 +166,23 @@ func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
 	// 3. Log errors
 }
 
-func (ph *ProtocolHandler) onTick(tick int) {
+func (ph *ProtocolHandler) onTick(n int) {
 
-	// TODO: Check all peer queues for expired requests
+	// Check for expired requests
+	ph.requestTimer.Tick(n)
+
+	// Update peer stats
+	for _, p := range ph.peers {
+		p.Stats().Update()
+	}
 
 	// Run choking algorithm
-	if tick%chokeInterval == 0 {
-		ChokePeers(ph.isSeed, ph.peers, tick%optimisticChokeInterval == 0)
+	if n%chokeInterval == 0 {
+		ChokePeers(ph.isSeed, ph.peers, n%optimisticChokeInterval == 0)
 	}
 
 	// Run piece picking algorithm
-	PickPieces(ph.peers, ph.pieceMap)
+	PickPieces(ph.peers, ph.pieceMap, ph.requestTimer)
 }
 
 func (ph *ProtocolHandler) onPeerError(id *PeerIdentity, err error) {

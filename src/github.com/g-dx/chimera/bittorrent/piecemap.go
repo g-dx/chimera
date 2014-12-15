@@ -81,6 +81,21 @@ func (p *PieceMap) ReturnBlocks(reqs []*RequestMessage) {
 	}
 }
 
+func (p *PieceMap) ReturnBlock(index, begin int) {
+	// TODO: Check index & begin valid!
+	pi := p.pieces[index]
+	pi.blocks[uint32(begin)/_16KB] = NEEDED
+
+	// Ensure we set overall piece state
+	pi.state = NOT_STARTED
+	for _, s := range pi.blocks {
+		if s == REQUESTED {
+			pi.state = BLOCKS_NEEDED
+			return
+		}
+	}
+}
+
 const (
 	NOT_STARTED = iota
 	BLOCKS_NEEDED
@@ -162,11 +177,11 @@ func (p *Piece) TakeBlocks(id *PeerIdentity, n int) []*RequestMessage {
 			p.blocks[i] = REQUESTED
 
 			// Check if this is last block
-			n := _16KB
+			length := _16KB
 			if i == len(p.blocks)-1 {
-				n = p.lastBlockLen
+				length = p.lastBlockLen
 			}
-			reqs = append(reqs, Request(id, p.index, uint32(i)*_16KB, n))
+			reqs = append(reqs, Request(id, p.index, uint32(i)*_16KB, length))
 		}
 
 		// Keep track of the overall piece a

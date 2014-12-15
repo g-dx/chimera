@@ -1,7 +1,6 @@
 package bittorrent
 
 import (
-	"fmt"
 	"sort"
 )
 
@@ -18,7 +17,7 @@ type ByDownloadSpeed []*Peer
 func (b ByDownloadSpeed) Len() int      { return len(b) }
 func (b ByDownloadSpeed) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
 func (b ByDownloadSpeed) Less(i, j int) bool {
-	return b[i].Stats().Download.Rate() < b[j].Stats().Download.Rate()
+	return b[i].Stats().Download.Rate() > b[j].Stats().Download.Rate()
 }
 
 type ByPriority []*Piece
@@ -27,14 +26,7 @@ func (b ByPriority) Len() int           { return len(b) }
 func (b ByPriority) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
 func (b ByPriority) Less(i, j int) bool { return b[i].Priority() < b[j].Priority() }
 
-func PickPieces(peers []*Peer, pieceMap *PieceMap) bool {
-
-	fmt.Println("Running piece picker...")
-
-	// Update counters
-	for _, p := range peers {
-		p.Stats().Update()
-	}
+func PickPieces(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequestTimer) bool {
 
 	// Sort into fastest downloaders
 	sort.Sort(ByDownloadSpeed(peers))
@@ -43,23 +35,24 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap) bool {
 	pieces := make([]*Piece, 0, len(pieceMap.pieces))
 	for _, peer := range peers {
 		if peer.CanDownload() {
-
-			fmt.Printf("Finding pieces for peer: %v\n", peer.id)
-
 			// Find all pieces which this peer has which still require blocks
+			peer.logger.Println("Picking for peer: ", peer.Id())
 			for _, piece := range pieceMap.pieces {
 				if !piece.FullyRequested() && peer.state.bitfield.Have(piece.index) {
 					pieces = append(pieces, piece)
 				}
 			}
 
+			peer.logger.Println("peer: ", peer.Id(), " pieces: ", pieces)
+
 			// Sort peer-specific pieces by priority
 			sort.Sort(ByPriority(pieces))
 
-			fmt.Printf("Peer: %v rarest pieces: %v\n", peer.id, pieces)
-
-			// Attempt to pick the number of required blocks
-			TakeBlocks(pieces, peer.BlocksRequired(), peer)
+			// Ensure an outstanding queue of 10
+			// TODO: Fix me!
+			n := peer.QueuedRequests() + requestTimer.BlocksWaiting(*peer.Id())
+			peer.logger.Println("peer: ", peer.Id(), " blocks outstanding: ", n)
+			TakeBlocks(pieces, 10 - n, peer)
 		}
 
 		// Clear peer list
@@ -73,10 +66,13 @@ func TakeBlocks(pieces []*Piece, numRequired int, p *Peer) {
 	n := numRequired
 	for _, piece := range pieces {
 		reqs := piece.TakeBlocks(p.id, n)
+		for _, msg := range reqs {
+			p.logger.Println("peer: ", p.Id(), " req: ", ToString(msg))
+		}
+
 		n -= len(reqs)
 		for _, req := range reqs {
-			fmt.Printf("Picker: %v, Peer: %v\n", req, p.id)
-			p.queue.Add(req)
+			p.Add(req)
 		}
 	}
 }

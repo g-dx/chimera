@@ -2,10 +2,10 @@ package bittorrent
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"strconv"
 	"testing"
+	"os"
 )
 
 func BenchmarkChokePeers10(b *testing.B) {
@@ -28,6 +28,7 @@ func BenchmarkChokePeers10(b *testing.B) {
 	p8.UnChoke(false)
 
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
+	defer teardown(peers)
 	for i := 0; i < b.N; i++ {
 		ChokePeers(false, peers, true)
 	}
@@ -38,6 +39,7 @@ func TestBuildCandidatesGivenNewPeers(t *testing.T) {
 	p1 := p1()
 	p2 := p2()
 	peers := asList(p1, p2)
+	defer teardown(peers)
 
 	c, cur := buildCandidates(peers)
 	intEquals(t, 6, len(c))
@@ -73,6 +75,7 @@ func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T
 	p1 := p1()
 	p2 := p2()
 	peers := asList(p1, p2)
+	defer teardown(peers)
 
 	// Set optimistic and unchoked
 	p1.UnChoke(true)
@@ -91,6 +94,7 @@ func TestChokePeersGivenNoOptimisticCandidatesAndNoOptimistic(t *testing.T) {
 	p1 := p1()
 	p2 := p2()
 	peers := asList(p1, p2)
+	defer teardown(peers)
 
 	// Set both unchoke
 	p1.UnChoke(false)
@@ -109,6 +113,7 @@ func TestChokePeersGivenNoInterestedPeers(t *testing.T) {
 	p2 := p2()
 	p3 := p3()
 	peers := asList(p1, p2, p3)
+	defer teardown(peers)
 
 	// Run choker
 	ChokePeers(false, peers, false)
@@ -121,6 +126,7 @@ func TestChokePeersGivenSameSpeedPeersWhenInterestChanges(t *testing.T) {
 	p2 := p2().dl(1)
 	p3 := p3().dl(1)
 	peers := asList(p1, p2, p3)
+	defer teardown(peers)
 
 	// Run choker
 	ChokePeers(false, peers, false)
@@ -153,6 +159,7 @@ func TestChokePeersGivenDifferentSpeedsWhenInterestChanges(t *testing.T) {
 	p7 := p7().dl(7).interested()
 	p8 := p8().dl(8)
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8)
+	defer teardown(peers)
 
 	// Run choker
 	ChokePeers(false, peers, false)
@@ -188,6 +195,7 @@ func TestChokePeersGivenDifferentSpeedsWhenSpeedChanges(t *testing.T) {
 	p7 := p7().dl(7).interested()
 	p8 := p8().dl(8)
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8)
+	defer teardown(peers)
 
 	ChokePeers(false, peers, false)
 	assertChoked(t, p1, p2, p3, p4)
@@ -222,6 +230,27 @@ func assertChokeStatus(t *testing.T, b bool, peers []*TestPeer) {
 
 type TestPeer struct {
 	*Peer
+	out chan ProtocolMessage
+}
+
+func (tp *TestPeer) notChoking() *TestPeer {
+	tp.state.localChoke = false
+	return tp
+}
+
+func (tp *TestPeer) choking() *TestPeer {
+	tp.state.localChoke = true
+	return tp
+}
+
+func (tp *TestPeer) interesting() *TestPeer {
+	tp.state.localInterest = true
+	return tp
+}
+
+func (tp *TestPeer) notInteresting() *TestPeer {
+	tp.state.localInterest = true
+	return tp
 }
 
 func (tp *TestPeer) interested() *TestPeer {
@@ -232,6 +261,16 @@ func (tp *TestPeer) interested() *TestPeer {
 
 func (tp *TestPeer) uninterested() *TestPeer {
 	tp.state.remoteInterest = false
+	return tp
+}
+
+func (tp *TestPeer) with(msgs ...ProtocolMessage) *TestPeer {
+	for _, msg := range msgs {
+		err := tp.OnMessage(msg)
+		if err != nil {
+			panic(err)
+		}
+	}
 	return tp
 }
 
@@ -252,13 +291,17 @@ func (tp *TestPeer) asPeer() *Peer {
 }
 
 func pr(i int) *TestPeer {
+	return per(i, NewPieceMap(1, 1, 1))
+}
+
+func per(i int, pm *PieceMap) *TestPeer {
+	out := make(chan ProtocolMessage)
 	p := NewPeer(
 		&PeerIdentity{[20]byte{}, strconv.Itoa(i)},
-		NewQueue(make(chan ProtocolMessage)),
-		1,
-		NewPieceMap(1, 1, 1),
-		log.New(ioutil.Discard, "", log.LstdFlags))
-	return &TestPeer{p}
+		NewQueue(out, func(int, int) {}),
+		pm,
+		log.New(os.Stdout, "", log.LstdFlags))
+	return &TestPeer{p, out}
 }
 
 func asList(tps ...*TestPeer) []*Peer {
@@ -267,6 +310,12 @@ func asList(tps ...*TestPeer) []*Peer {
 		ps = append(ps, p.asPeer())
 	}
 	return ps
+}
+
+func teardown(peers []*Peer) {
+	for _, p := range peers {
+		p.queue.Close()
+	}
 }
 
 //----------------------------------------------------

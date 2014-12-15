@@ -430,6 +430,12 @@ func ToString(pm ProtocolMessage) string {
 	case *BitfieldMessage:
 		return fmt.Sprintf("Bitfield [%x]", m.bits)
 	default:
-		return "Unknown Message"
+		return fmt.Sprintf("Unknown Message: %v", m)
+	}
+}
+
+func OnRequest(pm ProtocolMessage, f func(req *RequestMessage)) {
+	if req, ok := pm.(*RequestMessage); ok {
+		f(req)
 	}
 }

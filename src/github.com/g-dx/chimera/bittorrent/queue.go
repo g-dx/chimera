@@ -1,161 +1,132 @@
 package bittorrent
 
 import (
-	"errors"
-	"sync"
+	"sync/atomic"
 )
 
 const (
 	maxQueuedMessages int = 50
 )
 
-var errNoBufferSpace = errors.New("Outgoing buffer full.")
+// ----------------------------------------------------------------------------------
+// Queue
+// ----------------------------------------------------------------------------------
 
 type PeerQueue struct {
-	out    chan<- ProtocolMessage
-	done   chan struct{}
-	signal chan struct{}
+	out  chan<- ProtocolMessage
+	in   chan ProtocolMessage
+	done chan struct{}
+	choke chan chan []*RequestMessage
 
-	next           ProtocolMessage
-	pending        []ProtocolMessage
-	unsentRequests int
-	sentRequests   []*RequestMessage
-	timer          int64
-	mutex          sync.Mutex
+	pending []ProtocolMessage
+	next ProtocolMessage
+	onRequestSent func(int, int)
+	reqs int32
 }
 
-func (q *PeerQueue) Add(pm ProtocolMessage) error {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
+func NewQueue(out chan ProtocolMessage, f func(int, int)) *PeerQueue {
+	q := &PeerQueue{
+		out:     out,
+		in:      make(chan ProtocolMessage),
+		done:    make(chan struct{}),
+		choke:   make(chan chan []*RequestMessage),
 
-	if len(q.pending) == maxQueuedMessages {
-		return errNoBufferSpace
+		pending: make([]ProtocolMessage, 0, maxQueuedMessages),
+		onRequestSent : f,
 	}
-
-	// Update count & append to queue
-	if isRequestMessage(pm) {
-		q.unsentRequests++
-	}
-	q.pending = append(q.pending, pm)
-	q.signalIfNecessary()
-	return nil
+	go q.loop()
+	return q
 }
 
-func NewQueue(out chan ProtocolMessage) *PeerQueue {
-	return &PeerQueue{
-		out:            out,
-		done:           make(chan struct{}),
-		signal:         make(chan struct{}),
-		next:           nil,
-		pending:        make([]ProtocolMessage, 0, maxQueuedMessages),
-		unsentRequests: 0,
-		sentRequests:   make([]*RequestMessage, 0, maxQueuedMessages),
-		timer:          0,
-		mutex:          sync.Mutex{},
-	}
-}
+func (q *PeerQueue) Add(pm ProtocolMessage) { q.in <- pm }
 
-// Called we the peer has been choked. Returns all unsent request messages
+func (q *PeerQueue) QueuedRequests() int { return int(atomic.LoadInt32(&q.reqs)) }
+
 func (q *PeerQueue) Choke() []*RequestMessage {
-	// Clear all pending request messages...
-	return nil
+	c := make(chan []*RequestMessage)
+	q.choke <- c
+	reqs := <- c
+	close(c)
+	return reqs
 }
 
-// Called every heartbeat. All blocks which have timed out will be passed to the handler
-// which decides which ones to return and which to allow to continue
-func (q *PeerQueue) OnHeartbeat(beat int64) []*RequestMessage {
-
-	// How do we compare with timer?
-	return nil
-}
-
-// Called when a block arrives
-func (q *PeerQueue) OnBlock(index, offset, len uint32) {
-	// Remove from sent queue
-	// Reset timer?
-}
-
-func (q *PeerQueue) NumRequests() int {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
-	return len(q.sentRequests) + q.unsentRequests
+func (q *PeerQueue) Close() []*RequestMessage {
+	q.done <- struct{}{}
+	close(q.done)
+	close(q.choke)
+	close(q.out)
+	reqs := q.onChoke()
+	for _, msg := range q.pending {
+		msg.Recycle()
+	}
+	if q.next != nil {
+		q.next.Recycle()
+	}
+	return reqs
 }
 
 func (q *PeerQueue) loop() {
 
-	var c chan<- ProtocolMessage
+	var isRequest bool
+	var index, begin int
 	for {
-		c, q.next = q.maybeEnableSend()
+		// Configure next message to send
+		if q.next == nil {
+			index, begin, isRequest = q.maybeEnableSend()
+		}
+
 		select {
-		case c <- q.next:
-			if isRequestMessage(q.next) {
-				q.maybeStartRequestTimer(q.next)
+		case msg := <- q.in:
+			q.pending = append(q.pending, msg)
+			if _, ok := msg.(*RequestMessage); ok {
+				atomic.AddInt32(&q.reqs, 1)
+			}
+		case q.out <- q.next:
+			if isRequest{
+				q.onRequestSent(index, begin)
+				atomic.AddInt32(&q.reqs, -1)
 			}
 			q.next = nil
-		case <-q.done:
+		case _ = <- q.done:
 			return
-		case <-q.signal:
+		case c := <- q.choke:
+			c <- q.onChoke()
 		}
 	}
 }
 
-func (q *PeerQueue) Clear(p func(ProtocolMessage) bool) []ProtocolMessage {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
+func (q *PeerQueue) maybeEnableSend() (int, int, bool) {
+	var index, begin int
+	var isReq bool
+	if len(q.pending) > 0 {
+		q.next = q.pending[0]
+		q.pending = q.pending[1:]
 
-	// Collect all cleared requests
-	msgs := make([]ProtocolMessage, 10)
-	for i, m := range q.pending {
-		if p(m) {
-			// Remove & append to cleared list
-			q.pending = append(q.pending[:i], q.pending[i+1:]...)
-			msgs = append(msgs, m)
+		if req, ok := q.next.(*RequestMessage); ok {
+			index = int(req.Index())
+			begin = int(req.Begin())
+			isReq = true
 		}
 	}
-	return msgs
+	return index, begin, isReq
 }
 
-func (q *PeerQueue) maybeStartRequestTimer(pm ProtocolMessage) {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
+func (q *PeerQueue) onChoke() []*RequestMessage {
+	reqs := make([]*RequestMessage, 0, 5)
+	p := q.pending[:0]
 
-	q.unsentRequests--
-
-	// TODO: start timer??
-
-}
-
-func (q *PeerQueue) Close() []*RequestMessage {
-
-	// Blocking...
-	q.done <- struct{}{}
-
-	// Now collect sent * pending requests. No need for mutex anymore...
-	return nil
-}
-
-func (q *PeerQueue) maybeEnableSend() (c chan<- ProtocolMessage, next ProtocolMessage) {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
-
-	// Prep next message for sending
-	for len(q.pending) > 0 {
-		next = q.pending[0]
-		c = q.out
+	if req, ok := q.next.(*RequestMessage); ok {
+		reqs = append(reqs, req)
+		q.next = nil
 	}
-	return c, next
-}
 
-func isRequestMessage(pm ProtocolMessage) bool {
-	_, ok := pm.(*RequestMessage)
-	return ok
-}
-
-func (p *PeerQueue) signalIfNecessary() {
-	// Non-blocking send...
-	select {
-	case p.signal <- struct{}{}:
-		return
-	default:
+	for _, msg := range q.pending {
+		if req, ok := msg.(*RequestMessage); ok {
+			reqs = append(reqs, req)
+		} else {
+			p = append(p, msg)
+		}
 	}
+	q.pending = p
+	return reqs
 }

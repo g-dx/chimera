@@ -62,14 +62,13 @@ type Peer struct {
 
 func NewPeer(id *PeerIdentity,
 	queue *PeerQueue,
-	pieceCount uint32,
 	pieceMap *PieceMap,
 	logger *log.Logger) *Peer {
 
 	return &Peer{
 		id:         id,
 		pieceMap:   pieceMap,
-		state:      NewPeerState(NewBitSet(pieceCount)),
+		state:      NewPeerState(NewBitSet(uint32(len(pieceMap.pieces)))),
 		logger:     logger,
 		statistics: NewStatistics(),
 		queue:      queue,
@@ -81,7 +80,7 @@ func (p *Peer) Id() *PeerIdentity {
 }
 
 func (p *Peer) OnMessage(pm ProtocolMessage) error {
-	p.logger.Printf("%v, Handling Msg: %v\n", p.id, pm)
+	p.logger.Printf("Peer [%v] => %v\n", p.id, ToString(pm))
 	switch msg := pm.(type) {
 	case *ChokeMessage:
 		return p.onChoke()
@@ -209,9 +208,8 @@ func (p *Peer) Close() {
 	fmt.Printf("Peer (%v) closed.\n", p.id)
 }
 
-func (p *Peer) BlocksRequired() int {
-	// TODO: Fix me!
-	return p.queue.NumRequests()
+func (p *Peer) QueuedRequests() int {
+	return p.queue.QueuedRequests()
 }
 
 func (p *Peer) CanDownload() bool {
@@ -255,7 +253,21 @@ func (p *Peer) Cancel(index, begin, len uint32) error {
 }
 
 func (p *Peer) Add(pm ProtocolMessage) error {
-	return p.queue.Add(pm)
+	p.queue.Add(pm)
+	return nil // TODO: Fix this!
+}
+
+// ----------------------------------------------------------------------------------
+// Disk Callbacks
+// ----------------------------------------------------------------------------------
+
+func (p *Peer) onBlockRead(index, begin int, block []byte) {
+	p.Stats().Upload.Add(len(block))
+	p.Add(Block(p.id, uint32(index), uint32(begin), block))
+}
+
+func (p *Peer) onBlockWritten(index, begin, len int) {
+	p.Stats().Written.Add(len)
 }
 
 // ----------------------------------------------------------------------------------
