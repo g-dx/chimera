@@ -105,7 +105,7 @@ func NewConnection(addr string) (*PeerConnection, error) {
 }
 
 func (pc *PeerConnection) Establish(in <-chan ProtocolMessage,
-	out chan<- ProtocolMessage,
+	out chan<- *MessageList,
 	e chan<- PeerError,
 	handshake *HandshakeMessage,
 	logDir string) (*PeerIdentity, error) {
@@ -202,7 +202,7 @@ func (pc *PeerConnection) Close() error {
 
 type IncomingPeerConnection struct {
 	close         <-chan struct{}
-	c             chan<- ProtocolMessage
+	c             chan<- *MessageList
 	conn          net.Conn
 	buffer        []byte
 	pending       []ProtocolMessage
@@ -214,7 +214,7 @@ func (ic *IncomingPeerConnection) loop(err chan<- PeerError, id *PeerIdentity) {
 	defer onLoopExit(err, id)
 	var keepAlive = time.After(KEEP_ALIVE_PERIOD)
 	for {
-		c, next := ic.maybeEnableSend()
+		c, next := ic.maybeEnableSend(id)
 		select {
 		case <-ic.close:
 			break
@@ -246,11 +246,12 @@ func (ic *IncomingPeerConnection) readOrSleepFor(d time.Duration) int {
 	return n
 }
 
-func (ic *IncomingPeerConnection) maybeEnableSend() (chan<- ProtocolMessage, ProtocolMessage) {
-	var c chan<- ProtocolMessage
-	var next ProtocolMessage
+func (ic *IncomingPeerConnection) maybeEnableSend(id *PeerIdentity) (chan<- *MessageList, *MessageList) {
+	var c chan<- *MessageList
+	var next *MessageList
 	if len(ic.pending) > 0 {
-		next = ic.pending[0]
+		// TODO: Fix me!
+		next = NewMessageList(id, ic.pending[0])
 		c = ic.c
 	}
 	return c, next
@@ -258,7 +259,7 @@ func (ic *IncomingPeerConnection) maybeEnableSend() (chan<- ProtocolMessage, Pro
 
 func (ic *IncomingPeerConnection) maybeReadMessage(id *PeerIdentity) {
 	var msg ProtocolMessage
-	ic.buffer, msg = Unmarshal(id, ic.buffer)
+	ic.buffer, msg = Unmarshal(ic.buffer)
 
 	if msg != nil {
 		ic.logger.Print(msg)

@@ -35,7 +35,7 @@ func TestNewRegularPiece(t *testing.T) {
 	uint32Equals(t, _16KB, p.lastBlockLen)
 
 	// Check all requests
-	r := p.TakeBlocks(nil, 10)
+	r := p.TakeBlocks(10)
 	intEquals(t, 10, len(r))
 
 	// Requests 1 - 10
@@ -57,7 +57,7 @@ func TestNewIrregularPiece(t *testing.T) {
 	uint32Equals(t, 124, p.lastBlockLen)
 
 	// Check all requests
-	r := p.TakeBlocks(nil, 11)
+	r := p.TakeBlocks(11)
 	intEquals(t, 11, len(r))
 
 	// Requests 1 - 10
@@ -85,7 +85,7 @@ func TestPieceStateAndPriority(t *testing.T) {
 	notStartedPriority := p.Priority()
 
 	// Take some blocks
-	reqs := p.TakeBlocks(nil, 2)
+	reqs := p.TakeBlocks(2)
 	blocksNeedPriority := p.Priority()
 
 	// Check state & increased priority
@@ -105,7 +105,7 @@ func TestPieceStateAndPriority(t *testing.T) {
 	intEquals(t, notStartedPriority, p.Priority())
 
 	// Take all the blocks
-	reqs = p.TakeBlocks(nil, blocks)
+	reqs = p.TakeBlocks(blocks)
 	intEquals(t, blocks, len(reqs))
 
 	// Ensure fully requested and zero priority

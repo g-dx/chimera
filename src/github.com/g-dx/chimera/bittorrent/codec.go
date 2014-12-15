@@ -41,14 +41,31 @@ const (
 
 var havePool = &sync.Pool{
 	New: func() interface{} {
-		return &HaveMessage{GenericMessage{haveLength, haveId, nil, nil}, 0}
+		return &HaveMessage{GenericMessage{haveLength, haveId, nil}, 0}
 	},
 }
 
 var requestPool = &sync.Pool{
 	New: func() interface{} {
-		return &RequestMessage{BlockDetailsMessage{GenericMessage{requestLength, requestId, nil, nil}, 0, 0, 0}}
+		return &RequestMessage{BlockDetailsMessage{GenericMessage{requestLength, requestId, nil}, 0, 0, 0}}
 	},
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Message list
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type MessageList struct {
+	msgs []ProtocolMessage
+	id *PeerIdentity
+}
+
+func NewMessageList(id *PeerIdentity, msgs ...ProtocolMessage) *MessageList {
+	return &MessageList { msgs, id }
+}
+
+func (ml *MessageList) Add(pm ProtocolMessage) {
+	ml.msgs = append(ml.msgs, pm)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -58,14 +75,12 @@ var requestPool = &sync.Pool{
 type ProtocolMessage interface {
 	Id() byte
 	Len() uint32
-	PeerId() *PeerIdentity
 	Recycle()
 }
 
 type GenericMessage struct {
 	len    uint32
 	id     byte
-	peerId *PeerIdentity
 	pool   *sync.Pool
 }
 
@@ -77,13 +92,8 @@ func (m *GenericMessage) Len() uint32 {
 	return m.len
 }
 
-func (m *GenericMessage) PeerId() *PeerIdentity {
-	return m.peerId
-}
-
 func (m *GenericMessage) Recycle() {
 	if m.pool != nil {
-		m.peerId = nil
 		m.pool.Put(m)
 	}
 }
@@ -136,7 +146,7 @@ func Handshake(infoHash []byte) *HandshakeMessage {
 
 type KeepAliveMessage struct{ GenericMessage }
 
-var KeepAlive = &KeepAliveMessage{GenericMessage{keepAliveLength, 0, nil, nil}}
+var KeepAlive = &KeepAliveMessage{GenericMessage{keepAliveLength, 0, nil}}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Choke        <len=0001><id=0>
@@ -150,20 +160,20 @@ type UnchokeMessage struct{ GenericMessage }
 type InterestedMessage struct{ GenericMessage }
 type UninterestedMessage struct{ GenericMessage }
 
-func Choke(p *PeerIdentity) ProtocolMessage {
-	return &ChokeMessage{GenericMessage{chokeLength, chokeId, p, nil}}
+func Choke() ProtocolMessage {
+	return &ChokeMessage{GenericMessage{chokeLength, chokeId, nil}}
 }
 
-func Unchoke(p *PeerIdentity) ProtocolMessage {
-	return &UnchokeMessage{GenericMessage{unchokeLength, unchokeId, p, nil}}
+func Unchoke() ProtocolMessage {
+	return &UnchokeMessage{GenericMessage{unchokeLength, unchokeId, nil}}
 }
 
-func Interested(p *PeerIdentity) ProtocolMessage {
-	return &InterestedMessage{GenericMessage{interestedLength, interestedId, p, nil}}
+func Interested() ProtocolMessage {
+	return &InterestedMessage{GenericMessage{interestedLength, interestedId, nil}}
 }
 
-func Uninterested(p *PeerIdentity) ProtocolMessage {
-	return &UninterestedMessage{GenericMessage{uninterestedLength, uninterestedId, p, nil}}
+func Uninterested() ProtocolMessage {
+	return &UninterestedMessage{GenericMessage{uninterestedLength, uninterestedId, nil}}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -179,9 +189,8 @@ func (m *HaveMessage) Index() uint32 {
 	return m.index
 }
 
-func Have(p *PeerIdentity, i uint32) *HaveMessage {
+func Have(i uint32) *HaveMessage {
 	have := havePool.Get().(*HaveMessage)
-	have.peerId = p
 	have.index = i
 	have.pool = havePool
 	return have
@@ -200,8 +209,8 @@ func (m *BitfieldMessage) Bits() []byte {
 	return m.bits
 }
 
-func Bitfield(p *PeerIdentity, bits []byte) *BitfieldMessage {
-	return &BitfieldMessage{GenericMessage{uint32(1 + len(bits)), bitfieldId, p, nil}, bits}
+func Bitfield(bits []byte) *BitfieldMessage {
+	return &BitfieldMessage{GenericMessage{uint32(1 + len(bits)), bitfieldId, nil}, bits}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -229,20 +238,19 @@ func (m *BlockDetailsMessage) Length() uint32 {
 type CancelMessage struct{ BlockDetailsMessage }
 type RequestMessage struct{ BlockDetailsMessage }
 
-func Request(p *PeerIdentity, index, begin, length uint32) *RequestMessage {
+func Request(index, begin, length uint32) *RequestMessage {
 	req := requestPool.Get().(*RequestMessage)
 	req.index = index
 	req.begin = begin
 	req.length = length
-	req.peerId = p
 	req.pool = requestPool
 	return req
 }
 
-func Cancel(p *PeerIdentity, index, begin, length uint32) *CancelMessage {
+func Cancel(index, begin, length uint32) *CancelMessage {
 	return &CancelMessage{
 		BlockDetailsMessage{
-			GenericMessage{cancelLength, cancelId, p, nil},
+			GenericMessage{cancelLength, cancelId, nil},
 			index,
 			begin,
 			length,
@@ -272,9 +280,9 @@ func (m *BlockMessage) Block() []byte {
 	return m.block
 }
 
-func Block(p *PeerIdentity, index, begin uint32, block []byte) *BlockMessage {
+func Block(index, begin uint32, block []byte) *BlockMessage {
 	return &BlockMessage{
-		GenericMessage{uint32(9 + len(block)), blockId, p, nil},
+		GenericMessage{uint32(9 + len(block)), blockId, nil},
 		index,
 		begin,
 		block,
@@ -336,7 +344,7 @@ func Marshal(pm ProtocolMessage, buf []byte) {
 	}
 }
 
-func Unmarshal(p *PeerIdentity, buf []byte) ([]byte, ProtocolMessage) {
+func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {
 
 	// Do we have enough to calculate the length?
 	if len(buf) < 4 {
@@ -364,32 +372,32 @@ func Unmarshal(p *PeerIdentity, buf []byte) ([]byte, ProtocolMessage) {
 	data = data[1:]
 	switch messageId {
 	case chokeId:
-		return remainingBuf, Choke(p)
+		return remainingBuf, Choke()
 	case unchokeId:
-		return remainingBuf, Unchoke(p)
+		return remainingBuf, Unchoke()
 	case interestedId:
-		return remainingBuf, Interested(p)
+		return remainingBuf, Interested()
 	case uninterestedId:
-		return remainingBuf, Uninterested(p)
+		return remainingBuf, Uninterested()
 	case haveId:
 		index := Uint32(data)
-		return remainingBuf, Have(p, index)
+		return remainingBuf, Have(index)
 	case bitfieldId:
-		return remainingBuf, Bitfield(p, data)
+		return remainingBuf, Bitfield(data)
 	case requestId:
 		index := Uint32(data[0:4])
 		begin := Uint32(data[4:8])
 		length := Uint32(data[8:12])
-		return remainingBuf, Request(p, index, begin, length)
+		return remainingBuf, Request(index, begin, length)
 	case blockId:
 		index := Uint32(data[0:4])
 		begin := Uint32(data[4:8])
-		return remainingBuf, Block(p, index, begin, data[8:])
+		return remainingBuf, Block(index, begin, data[8:])
 	case cancelId:
 		index := Uint32(data[0:4])
 		begin := Uint32(data[4:8])
 		length := Uint32(data[8:12])
-		return remainingBuf, Cancel(p, index, begin, length)
+		return remainingBuf, Cancel(index, begin, length)
 	default:
 		fmt.Printf("Unknown message: %v", data)
 		return remainingBuf, nil

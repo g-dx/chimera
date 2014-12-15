@@ -80,7 +80,6 @@ func (p *Peer) Id() *PeerIdentity {
 }
 
 func (p *Peer) OnMessage(pm ProtocolMessage) error {
-	p.logger.Printf("Peer [%v] => %v\n", p.id, ToString(pm))
 	switch msg := pm.(type) {
 	case *ChokeMessage:
 		return p.onChoke()
@@ -141,7 +140,7 @@ func (p *Peer) onHave(index uint32) error {
 		p.pieceMap.Inc(index)
 
 		if p.isNowInteresting(index) {
-			p.queue.Add(Interested(p.id))
+			p.queue.Add(Interested())
 		}
 	}
 	return nil
@@ -182,7 +181,7 @@ func (p *Peer) onBitfield(bits []byte) error {
 	for i := uint32(0); i < p.state.bitfield.Size(); i++ {
 		if p.pieceMap.Piece(i).RequestsRequired() {
 			p.state.localInterest = true
-			p.queue.Add(Interested(p.id))
+			p.queue.Add(Interested())
 			break
 		}
 	}
@@ -218,14 +217,14 @@ func (p *Peer) CanDownload() bool {
 
 func (p *Peer) Choke() error {
 	p.state.remoteChoke = true
-	return p.Add(Choke(p.id))
+	return p.Add(Choke())
 }
 
 func (p *Peer) UnChoke(optimistic bool) error {
 	p.state.optimistic = optimistic
 	p.state.new = false
 	p.state.remoteChoke = false
-	return p.Add(Unchoke(p.id))
+	return p.Add(Unchoke())
 }
 
 func (p *Peer) IsInterested() bool {
@@ -249,7 +248,7 @@ func (p *Peer) IsNew() bool {
 }
 
 func (p *Peer) Cancel(index, begin, len uint32) error {
-	return p.Add(Cancel(p.id, index, begin, len))
+	return p.Add(Cancel(index, begin, len))
 }
 
 func (p *Peer) Add(pm ProtocolMessage) error {
@@ -263,7 +262,7 @@ func (p *Peer) Add(pm ProtocolMessage) error {
 
 func (p *Peer) onBlockRead(index, begin int, block []byte) {
 	p.Stats().Upload.Add(len(block))
-	p.Add(Block(p.id, uint32(index), uint32(begin), block))
+	p.Add(Block(uint32(index), uint32(begin), block))
 }
 
 func (p *Peer) onBlockWritten(index, begin, len int) {

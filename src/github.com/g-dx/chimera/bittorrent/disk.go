@@ -206,7 +206,7 @@ func (da DiskAccess) onReadMessage(drm *DiskReadMessage) (DiskMessageResult, err
 	if err != nil {
 		return nil, err
 	}
-	return &DiskReadResult{drm.Id(), Block(drm.Id(), drm.index, drm.begin, buf)}, nil
+	return &DiskReadResult{drm.Id(), Block(drm.index, drm.begin, buf)}, nil
 }
 
 func (da DiskAccess) onWriteMessage(drm *DiskWriteMessage) (DiskMessageResult, error) {

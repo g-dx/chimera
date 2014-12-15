@@ -36,14 +36,14 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequest
 	for _, peer := range peers {
 		if peer.CanDownload() {
 			// Find all pieces which this peer has which still require blocks
-			peer.logger.Println("Picking for peer: ", peer.Id())
+//			peer.logger.Println("Picking for peer: ", peer.Id())
 			for _, piece := range pieceMap.pieces {
 				if !piece.FullyRequested() && peer.state.bitfield.Have(piece.index) {
 					pieces = append(pieces, piece)
 				}
 			}
 
-			peer.logger.Println("peer: ", peer.Id(), " pieces: ", pieces)
+//			peer.logger.Println("peer: ", peer.Id(), " pieces: ", pieces)
 
 			// Sort peer-specific pieces by priority
 			sort.Sort(ByPriority(pieces))
@@ -51,7 +51,7 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequest
 			// Ensure an outstanding queue of 10
 			// TODO: Fix me!
 			n := peer.QueuedRequests() + requestTimer.BlocksWaiting(*peer.Id())
-			peer.logger.Println("peer: ", peer.Id(), " blocks outstanding: ", n)
+//			peer.logger.Println("peer: ", peer.Id(), " blocks outstanding: ", n)
 			TakeBlocks(pieces, 10 - n, peer)
 		}
 
@@ -65,10 +65,10 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequest
 func TakeBlocks(pieces []*Piece, numRequired int, p *Peer) {
 	n := numRequired
 	for _, piece := range pieces {
-		reqs := piece.TakeBlocks(p.id, n)
-		for _, msg := range reqs {
-			p.logger.Println("peer: ", p.Id(), " req: ", ToString(msg))
-		}
+		reqs := piece.TakeBlocks(n)
+//		for _, msg := range reqs {
+//			p.logger.Println("peer: ", p.Id(), " req: ", ToString(msg))
+//		}
 
 		n -= len(reqs)
 		for _, req := range reqs {

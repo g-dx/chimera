@@ -32,7 +32,7 @@ type ProtocolHandler struct {
 	done             chan struct{}
 	dir              string
 	logger           *log.Logger
-	peerMsgs         chan ProtocolMessage
+	peerMsgs         chan *MessageList
 	peerErrors       chan PeerError
 	isSeed           bool
 	requestTimer     *ProtocolRequestTimer
@@ -60,7 +60,7 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 		done:             make(chan struct{}),
 		dir:              dir,
 		logger:           logger,
-		peerMsgs:         make(chan ProtocolMessage, 100),
+		peerMsgs:         make(chan *MessageList, 100),
 		peerErrors:       make(chan PeerError),
 		isSeed:           false,
 	}
@@ -88,8 +88,10 @@ func (ph *ProtocolHandler) loop() {
 		case r := <-ph.trackerResponses:
 			ph.onTrackerResponse(r)
 
-		case m := <-ph.peerMsgs:
-			ph.onPeerMessage(m)
+		case list := <-ph.peerMsgs:
+			for _, msg := range list.msgs {
+				ph.onPeerMessage(list.id, msg)
+			}
 
 		case e := <-ph.peerErrors:
 			ph.onPeerError(e.Id(), e.Error())
@@ -145,9 +147,9 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 	ph.newPeers <- NewPeer(id, NewQueue(out, f), ph.pieceMap, ph.logger)
 }
 
-func (ph *ProtocolHandler) onPeerMessage(msg ProtocolMessage) {
+func (ph *ProtocolHandler) onPeerMessage(id *PeerIdentity, msg ProtocolMessage) {
 
-	p := ph.findPeer(msg.PeerId())
+	p := ph.findPeer(id)
 	if p != nil {
 		err := p.OnMessage(msg)
 		if err != nil {
