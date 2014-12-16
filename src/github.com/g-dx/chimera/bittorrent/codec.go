@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"bytes"
 )
 
 const (
@@ -122,7 +123,7 @@ type HandshakeMessage struct {
 }
 
 // Incoming handshake
-func handshake(p *PeerIdentity, infoHash []byte, peerId []byte) *HandshakeMessage {
+func handshake(infoHash []byte, peerId []byte) *HandshakeMessage {
 	return &HandshakeMessage{
 		protocolName,
 		[8]byte{},
@@ -137,7 +138,7 @@ func Handshake(infoHash []byte) *HandshakeMessage {
 		panic(errors.New("Invalid info_hash length."))
 	}
 
-	return handshake(nil, infoHash, PeerId)
+	return handshake(infoHash, PeerId)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -285,7 +286,7 @@ func Block(index, begin uint32, block []byte) *BlockMessage {
 		GenericMessage{uint32(9 + len(block)), blockId, nil},
 		index,
 		begin,
-		block,
+		append(make([]byte, 0, len(block)), block...), // TODO: Should come from a pool!
 	}
 }
 
@@ -294,20 +295,10 @@ func WriteHandshake(h *HandshakeMessage, buf []byte) error {
 	return nil
 }
 
-func ReadHandshake(buf []byte, id *PeerIdentity) ([]byte, *HandshakeMessage) {
-
-	// Do we have enough data for handshake?
-	if len(buf) < int(handshakeLength) {
-		return nil, nil
-	}
-
-	// Calculate handshake data & any remaining
-	data := buf[0:handshakeLength]
-	remainingBuf := buf[handshakeLength:]
-
+func ReadHandshake(buf []byte) *HandshakeMessage {
 	// TODO: Assert the protocol & reserved bytes?
 
-	return remainingBuf, handshake(id, data[28:48], data[48:handshakeLength])
+	return handshake(buf[28:48], buf[48:handshakeLength])
 }
 
 func Marshal(pm ProtocolMessage, buf []byte) {
@@ -344,63 +335,63 @@ func Marshal(pm ProtocolMessage, buf []byte) {
 	}
 }
 
-func Unmarshal(buf []byte) ([]byte, ProtocolMessage) {
+func Unmarshal(r *bytes.Buffer) ProtocolMessage {
 
 	// Do we have enough to calculate the length?
-	if len(buf) < 4 {
-		return buf, nil
+	if r.Len() < 4 {
+		return nil
 	}
 
 	// Check: Keepalive
-	msgLen := Uint32(buf[0:4])
-	remainingBuf := buf[4:]
+	msgLen := Uint32(r.Bytes()[0:4])
 	if msgLen == 0 {
-		return remainingBuf, KeepAlive
+		r.Next(4)
+		return KeepAlive
 	}
 
-	// Do we have to unmarshal a message?
-	if len(remainingBuf) < int(msgLen) {
-		return buf, nil
+	// Do we have enough to unmarshal a message?
+	if r.Len() < int(msgLen) + 4 {
+		return nil
 	}
 
-	// Calculate data & any remaining
-	data := remainingBuf[:msgLen]
-	remainingBuf = remainingBuf[msgLen:]
+	// Discard header & read message
+	r.Next(4)
+	bytes := r.Next(int(msgLen))
 
 	// Build a message
-	messageId := data[0]
-	data = data[1:]
+	messageId := bytes[0]
+	data := bytes[1:]
 	switch messageId {
 	case chokeId:
-		return remainingBuf, Choke()
+		return Choke()
 	case unchokeId:
-		return remainingBuf, Unchoke()
+		return Unchoke()
 	case interestedId:
-		return remainingBuf, Interested()
+		return Interested()
 	case uninterestedId:
-		return remainingBuf, Uninterested()
+		return Uninterested()
 	case haveId:
 		index := Uint32(data)
-		return remainingBuf, Have(index)
+		return Have(index)
 	case bitfieldId:
-		return remainingBuf, Bitfield(data)
+		return Bitfield(data)
 	case requestId:
 		index := Uint32(data[0:4])
 		begin := Uint32(data[4:8])
 		length := Uint32(data[8:12])
-		return remainingBuf, Request(index, begin, length)
+		return Request(index, begin, length)
 	case blockId:
 		index := Uint32(data[0:4])
 		begin := Uint32(data[4:8])
-		return remainingBuf, Block(index, begin, data[8:])
+		return Block(index, begin, data[8:])
 	case cancelId:
 		index := Uint32(data[0:4])
 		begin := Uint32(data[4:8])
 		length := Uint32(data[8:12])
-		return remainingBuf, Cancel(index, begin, length)
+		return Cancel(index, begin, length)
 	default:
-		fmt.Printf("Unknown message: %v", data)
-		return remainingBuf, nil
+		// Unknown message
+		return &GenericMessage{msgLen, messageId, nil}
 	}
 }
 
@@ -437,6 +428,8 @@ func ToString(pm ProtocolMessage) string {
 		return fmt.Sprintf("Request [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
 	case *BitfieldMessage:
 		return fmt.Sprintf("Bitfield [%x]", m.bits)
+	case *GenericMessage:
+		return fmt.Sprintf("Generic Message [Len: %v, Id: %v]", m.len, m.id)
 	default:
 		return fmt.Sprintf("Unknown Message: %v", m)
 	}

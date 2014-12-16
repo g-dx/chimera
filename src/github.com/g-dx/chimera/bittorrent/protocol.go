@@ -9,6 +9,7 @@ import (
 
 var (
 	FIFTY_MILLISECONDS = 50 * time.Millisecond
+	oneSecond = 1 * time.Second
 )
 
 const (
@@ -81,7 +82,7 @@ func (ph *ProtocolHandler) loop() {
 	for {
 
 		select {
-		case <-time.After(ONE_SECOND):
+		case <-time.After(oneSecond):
 			ph.onTick(tick)
 			tick++
 

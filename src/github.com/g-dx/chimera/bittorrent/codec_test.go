@@ -2,6 +2,7 @@ package bittorrent
 
 import (
 	"testing"
+	"bytes"
 )
 
 const (
@@ -34,52 +35,49 @@ func encodeTo(pm ProtocolMessage) []byte {
 
 func TestDecode(t *testing.T) {
 
-	buf := []byte{0, 0, 0, 0, 0, 0, 0, 1, 0}
+	buf := bytes.NewBuffer([]byte{0, 0, 0, 0, 0, 0, 0, 1, 0})
 
-	remainingBuf, pm := Unmarshal(buf)
+	pm := Unmarshal(buf)
 	msgEquals(t, KeepAlive, pm)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	pm = Unmarshal(buf)
 	msgEquals(t, Choke(), pm)
 
 	// Add more bytes
-	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 1}...)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.Write([]byte{0, 0, 0, 1})
+	pm = Unmarshal(buf)
 	isNil(t, pm)
 
 	// Complete message
-	remainingBuf = append(remainingBuf, 1)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.WriteByte(1)
+	pm = Unmarshal(buf)
 	msgEquals(t, Unchoke(), pm)
 
-	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 1, 2}...)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.Write([]byte{0, 0, 0, 1, 2})
+	pm = Unmarshal(buf)
 	msgEquals(t, Interested(), pm)
 
-	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 1, 3}...)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.Write([]byte{0, 0, 0, 1, 3})
+	pm = Unmarshal(buf)
 	msgEquals(t, Uninterested(), pm)
 
-	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 5, 4, 0, 0, 1, 1}...)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.Write([]byte{0, 0, 0, 5, 4, 0, 0, 1, 1})
+	pm = Unmarshal(buf)
 	msgEquals(t, Have(257), pm)
 
-	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 4, 5, 1, 2, 3}...)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.Write([]byte{0, 0, 0, 4, 5, 1, 2, 3})
+	pm = Unmarshal(buf)
 	msgEquals(t, Bitfield([]byte{1, 2, 3}), pm)
 
-	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 13, 6, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3}...)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.Write([]byte{0, 0, 0, 13, 6, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3})
+	pm = Unmarshal(buf)
 	msgEquals(t, Request(1, 2, 3), pm)
 
-	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 14, 7, 0, 0, 0, 1, 0, 0, 0, 2, 255, 255, 255, 255, 255, 10}...)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.Write([]byte{0, 0, 0, 14, 7, 0, 0, 0, 1, 0, 0, 0, 2, 255, 255, 255, 255, 255})
+	pm = Unmarshal(buf)
 	msgEquals(t, Block(1, 2, []byte{255, 255, 255, 255, 255}), pm)
-	intEquals(t, 1, len(remainingBuf))
-	intEquals(t, 10, int(remainingBuf[0]))
-	remainingBuf = []byte{}
 
-	remainingBuf = append(remainingBuf, []byte{0, 0, 0, 13, 8, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 6}...)
-	remainingBuf, pm = Unmarshal(remainingBuf)
+	buf.Write([]byte{0, 0, 0, 13, 8, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 6})
+	pm = Unmarshal(buf)
 	msgEquals(t, Cancel(4, 5, 6), pm)
 
 }
