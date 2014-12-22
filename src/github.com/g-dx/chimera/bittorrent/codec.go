@@ -141,6 +141,22 @@ func Handshake(infoHash []byte) *HandshakeMessage {
 	return handshake(infoHash, PeerId)
 }
 
+func WriteHandshake(h *HandshakeMessage) []byte {
+	buf := make([]byte, 0, handshakeLength)
+	buf = append(buf, byte(len(protocolName)))
+	buf = append(buf, []byte(protocolName)...)
+	buf = append(buf, make([]byte, 8)...)
+	buf = append(buf, h.infoHash...)
+	buf = append(buf, h.peerId...)
+	return buf
+}
+
+func ReadHandshake(buf []byte) *HandshakeMessage {
+	// TODO: Assert the protocol & reserved bytes?
+
+	return handshake(buf[28:48], buf[48:handshakeLength])
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // KeepAlive <len=0000>
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -288,17 +304,6 @@ func Block(index, begin uint32, block []byte) *BlockMessage {
 		begin,
 		append(make([]byte, 0, len(block)), block...), // TODO: Should come from a pool!
 	}
-}
-
-func WriteHandshake(h *HandshakeMessage, buf []byte) error {
-	// TODO: implement me!
-	return nil
-}
-
-func ReadHandshake(buf []byte) *HandshakeMessage {
-	// TODO: Assert the protocol & reserved bytes?
-
-	return handshake(buf[28:48], buf[48:handshakeLength])
 }
 
 func Marshal(pm ProtocolMessage, buf []byte) {

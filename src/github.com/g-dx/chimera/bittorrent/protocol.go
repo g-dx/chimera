@@ -127,10 +127,19 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 		return
 	}
 
+	// Create log file & create loggers
+	path := fmt.Sprintf("%v/%v.log", ph.dir, conn.in.conn.RemoteAddr())
+	file, err := os.Create(path)
+	if err != nil {
+		ph.logger.Printf("Can't create log file [%v]\n", path)
+		conn.Close()
+		return
+	}
+
 	out := make(chan ProtocolMessage)
 
 	// Attempt to establish connection
-	id, err := conn.Establish(out, ph.peerMsgs, ph.peerErrors, Handshake(ph.metaInfo.InfoHash), ph.dir)
+	id, err := conn.Establish(out, ph.peerMsgs, ph.peerErrors, Handshake(ph.metaInfo.InfoHash), file, true)
 	if err != nil {
 		ph.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
 		conn.Close()
