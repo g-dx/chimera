@@ -12,18 +12,18 @@ import (
 )
 
 var (
-	keepAlivePeriod   = 1 * time.Minute
+	keepAlivePeriod     = 1 * time.Minute
 	DIAL_TIMEOUT        = 10 * time.Second
-	handshakeTimeout   = 5 * time.Second
+	handshakeTimeout    = 5 * time.Second
 	ONE_HUNDRED_MILLIS  = 100 * time.Millisecond
 	FIVE_HUNDRED_MILLIS = 5 * ONE_HUNDRED_MILLIS
 
-	oneMegaByte = 1 * 1024 * 1024
+	oneMegaByte      = 1 * 1024 * 1024
 	fiveHundredMills = 500 * time.Millisecond
 
-	errHashesNotEquals          = errors.New("Info hashes not equal")
-	errHandshakeNotReceived     = errors.New(fmt.Sprintf("Handshake not received in: %v", handshakeTimeout))
-	errKeepAliveExpired         = errors.New("Read KeepAlive expired")
+	errHashesNotEquals      = errors.New("Info hashes not equal")
+	errHandshakeNotReceived = errors.New(fmt.Sprintf("Handshake not received in: %v", handshakeTimeout))
+	errKeepAliveExpired     = errors.New("Read KeepAlive expired")
 )
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -91,22 +91,21 @@ func createConnection(conn net.Conn) *PeerConnection {
 	c := make(chan struct{}, 2) // 2 close messages - one for reader, other for writer
 	return &PeerConnection{
 		close: c,
-		in: IncomingPeerConnection{ c, nil, conn, nil },
-		out: OutgoingPeerConnection{ c, nil, conn, make([]byte, 0), nil},
+		in:    IncomingPeerConnection{c, nil, conn, nil},
+		out:   OutgoingPeerConnection{c, nil, conn, make([]byte, 0), nil},
 	}
 }
 
-
-func (pc *PeerConnection) Establish(in <-chan ProtocolMessage,
-	out chan<- *MessageList,
+func (pc *PeerConnection) Establish(in chan ProtocolMessage,
+	out chan *MessageList,
 	e chan<- PeerError,
 	handshake *HandshakeMessage,
 	w io.Writer,
-    outgoing bool) (*PeerIdentity, error) {
+	outgoing bool) (*PeerIdentity, error) {
 
 	pc.in.log = log.New(w, " in  ->", log.Ldate|log.Ltime)
-	pc.out.logger = log.New(w, " out <-" + pc.in.conn.RemoteAddr().String() + " => ", log.Ldate|log.Ltime|log.Lmicroseconds)
-	pc.logger = log.New(w, "  -  --" + pc.in.conn.RemoteAddr().String() + " => ", log.Ldate|log.Ltime|log.Lmicroseconds)
+	pc.out.logger = log.New(w, " out <-"+pc.in.conn.RemoteAddr().String()+" => ", log.Ldate|log.Ltime|log.Lmicroseconds)
+	pc.logger = log.New(w, "  -  --"+pc.in.conn.RemoteAddr().String()+" => ", log.Ldate|log.Ltime|log.Lmicroseconds)
 
 	// Ensure we handshake properly
 	id, err := pc.completeHandshake(handshake, outgoing)
@@ -133,42 +132,24 @@ func (pc *PeerConnection) Establish(in <-chan ProtocolMessage,
 
 func (pc *PeerConnection) completeHandshake(handshake *HandshakeMessage, outgoing bool) (pi *PeerIdentity, err error) {
 
-	// TODO: we should possibly be first reading if this is an incoming connection
-	// Write outgoing handshake & attempt to read incoming handshake
-	handshakeBuf := bytes.NewBuffer(make([]byte, 0, handshakeLength))
+	var inHandshake *HandshakeMessage
 	if outgoing {
-		pc.logger.Printf("Writing handshake for [%v]", handshakeTimeout)
 		pc.out.curr = WriteHandshake(handshake)
 		pc.out.writeOrReceiveFor(handshakeTimeout)
-		pc.logger.Printf("Written handshake")
-		n, err := pc.in.readFor(handshakeBuf, handshakeTimeout)
+		inHandshake, err = pc.readHandshake()
 		if err != nil {
 			return nil, err
-		}
-		pc.logger.Printf("Read [%v] handshake bytes", n)
-		if handshakeBuf.Len() != int(handshakeLength) {
-			return nil, errHandshakeNotReceived
 		}
 	} else {
-		pc.logger.Printf("Waiting for [%v] for handshake", handshakeTimeout)
-		n, err := pc.in.readFor(handshakeBuf, 2500 * time.Millisecond)
+		inHandshake, err = pc.readHandshake()
 		if err != nil {
 			return nil, err
 		}
-		pc.logger.Printf("Read [%v] handshake bytes", n)
-		if handshakeBuf.Len() != int(handshakeLength) {
-			return nil, errHandshakeNotReceived
-		}
-		pc.logger.Printf("Read handshake")
 		pc.out.curr = WriteHandshake(handshake)
 		pc.out.writeOrReceiveFor(handshakeTimeout)
-		pc.logger.Printf("Written handshake - done")
 	}
 
-	// Create buffer for handshake
-
-	// Read handshake & assert hashes
-	inHandshake := ReadHandshake(handshakeBuf.Bytes())
+	// Assert hashes
 	if !bytes.Equal(handshake.infoHash, inHandshake.infoHash) {
 		return nil, errHashesNotEquals
 	}
@@ -179,13 +160,29 @@ func (pc *PeerConnection) completeHandshake(handshake *HandshakeMessage, outgoin
 	return id, nil
 }
 
+func (pc *PeerConnection) readHandshake() (in *HandshakeMessage, err error) {
+
+	// Need to read handshake with a different timeout
+	buf := make([]byte, handshakeLength)
+	pc.in.conn.SetReadDeadline(time.Now().Add(handshakeTimeout))
+	_, err = pc.in.conn.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	if len(buf) != int(handshakeLength) {
+		return nil, errHandshakeNotReceived
+	}
+	return ReadHandshake(buf), nil
+}
+
 func (pc *PeerConnection) Close() error {
 
 	pc.logger.Println("Closing connection")
 
 	// Shutdown reader & writer
-	pc.close <- struct{}{}
-	pc.close <- struct{}{}
+	close(pc.close)
+
+	// TODO: Should really be waiting until connection read or write times out
 
 	// Finally, shutdown connection
 	err := pc.in.conn.Close()
@@ -197,13 +194,21 @@ func (pc *PeerConnection) Close() error {
 	return nil
 }
 
+func (pc *PeerConnection) Send(msg ProtocolMessage) {
+	pc.out.c <- msg
+}
+
+func (pc *PeerConnection) Receive() *MessageList {
+	return <-pc.in.c
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Incoming Connection
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type IncomingPeerConnection struct {
 	done <-chan struct{}
-	c    chan<- *MessageList
+	c    chan *MessageList
 	conn net.Conn
 	log  *log.Logger
 }
@@ -215,7 +220,9 @@ func (ic *IncomingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, 
 	for {
 		// Read for a max of 500ms
 		n, err := ic.readFor(buf, fiveHundredMills)
-		if !isTimeout(err) {
+		ic.log.Printf("Read [%v] bytes, error: %v", n, err)
+
+		if err != nil && !isTimeout(err) {
 			panic(err)
 		}
 
@@ -226,6 +233,7 @@ func (ic *IncomingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, 
 
 		// Decode messages & send if we have any
 		l := ic.decodeMessages(buf, id)
+		ic.log.Printf("Decoded [%v] messages", l)
 		if l != nil {
 			select {
 			case <-keepAlive.C:
@@ -242,14 +250,12 @@ func (ic *IncomingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, 
 
 func (ic *IncomingPeerConnection) readFor(buf *bytes.Buffer, d time.Duration) (int64, error) {
 	t := time.Now().Add(d)
-	ic.log.Printf("Set read deadline for [%v]", t)
 	ic.conn.SetReadDeadline(t)
 	n, err := buf.ReadFrom(ic.conn)
 	return n, err
 }
 
-
- func (ic *IncomingPeerConnection) decodeMessages(buf *bytes.Buffer, id *PeerIdentity) *MessageList {
+func (ic *IncomingPeerConnection) decodeMessages(buf *bytes.Buffer, id *PeerIdentity) *MessageList {
 	var msgs *MessageList
 	var msg ProtocolMessage
 	for {
@@ -277,7 +283,7 @@ func (ic *IncomingPeerConnection) readFor(buf *bytes.Buffer, d time.Duration) (i
 
 type OutgoingPeerConnection struct {
 	close  <-chan struct{}
-	c      <-chan ProtocolMessage
+	c      chan ProtocolMessage
 	conn   net.Conn
 	curr   []byte
 	logger *log.Logger
@@ -287,13 +293,13 @@ func (oc *OutgoingPeerConnection) loop(err chan<- PeerError, id *PeerIdentity) {
 	defer onLoopExit(err, id)
 	var keepAlive = time.After(keepAlivePeriod)
 	for {
-		c := oc.maybeEnableReceive()
+		//		c := oc.maybeEnableReceive()
 		select {
 		case <-oc.close:
 			break
 		case <-keepAlive:
 			oc.append(KeepAlive)
-		case msg := <-c:
+		case msg := <-oc.c:
 			oc.append(msg)
 		default:
 			if n := oc.writeOrReceiveFor(FIVE_HUNDRED_MILLIS); n > 0 {
@@ -313,8 +319,7 @@ func (oc *OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
 }
 
 func (oc *OutgoingPeerConnection) append(msg ProtocolMessage) {
-	oc.logger.Print(msg)
-
+	oc.logger.Print(ToString(msg))
 	buffer := make([]byte, int(4+msg.Len()))
 	Marshal(msg, buffer)
 	oc.curr = append(oc.curr, buffer...)
@@ -371,7 +376,7 @@ func write(w io.Writer, buf []byte) ([]byte, int, bool) {
 }
 
 func isTimeout(err error) bool {
-	opErr, ok := err.(*net.OpError);
+	opErr, ok := err.(*net.OpError)
 	return ok && opErr.Timeout()
 }
 
@@ -383,9 +388,9 @@ func panicIfNotTimeout(err error) {
 }
 
 type ConnectionListener struct {
-	l net.Listener
+	l     net.Listener
 	conns chan<- *PeerConnection
-	done chan struct{}
+	done  chan struct{}
 }
 
 func NewConnectionListener(conns chan<- *PeerConnection, laddr string) (*ConnectionListener, error) {
@@ -396,7 +401,7 @@ func NewConnectionListener(conns chan<- *PeerConnection, laddr string) (*Connect
 		return nil, err
 	}
 
-	cl := &ConnectionListener{ ln, conns, make(chan struct{}) }
+	cl := &ConnectionListener{ln, conns, make(chan struct{})}
 	go cl.loop()
 	return cl, nil
 }

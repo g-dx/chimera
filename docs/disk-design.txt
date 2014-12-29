@@ -1,0 +1,56 @@
+Questions:
+----------
+
+- How do we do hashing?
+- How do we cache small torrents in memory?
+- How do we make efficient use of disk writes/read?
+- Where do we need caches of buffers, pieces, etc?
+
+
+How do we do hashing?
+---------------------
+
+Blocks may arrive out of order. It would be inefficient to write every block to disk and then on the final block re-read
+everything to check the hash value. It seems we need to cache _pieces_ in memory. Then when the piece is done we can
+calculate the hash, if invalid discard else write the whole block to disk and inform coordinator.
+
+It would be useful to bound the number of pieces we are working on to match the number of pieces in the disk cache. This
+way if the piece picker reached a limit of in progress pieces it wouldn't pick any more until the disk reported some as
+done.
+
+How do we cache small torrents in memory?
+-----------------------------------------
+
+The soln outlined above would allow small torrents to be held totally in memory. More specifically if the torrent was
+beneath the disk cache's size (say, 4Mb) then it would always be held in memory.
+
+How do we make efficient use of disk writes/read?
+-------------------------------------------------
+
+If the "cache piece" outlined above contains a []byte slice of all the data then we can write pieces at a time.
+
+Where do we need caches of buffers, pieces, etc?
+------------------------------------------------
+
+- Peer disk reads need to supply a buffer. Get this from a BlockMessage?
+- Peer disk writes need to pass their buffer. Get this from a BlockMessage?
+
+How do we close the channel to return read blocks on?
+-----------------------------------------------------
+
+When peers request a block be read from disk we must provide a way for that result to be returned and written out on
+the connection. Between making a request and the disk fulfilling it the peer may be closed. How do we do this?
+
+1. Provide a channel to return the result and check for closure? The only way to do this is to catch panics. Not good.
+2. Send all pieces to be read through the protocol handler and if they cannot find the peer anymore then it has been
+closed and the block should discarded. This is another layer of indirection but is probably the most straightforward to
+reason about. Also if the channel is heavily buffered then this should incur minimal locks.
+
+The protocol is then waiting on:
+- msgs from peers
+- msgs from disk
+- errors from peers
+- tracker responses
+- ticks to run picker & choker
+- new incoming connections
+- newly established peers

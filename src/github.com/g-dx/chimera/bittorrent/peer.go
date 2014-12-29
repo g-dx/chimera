@@ -43,21 +43,12 @@ func NewPeerState(bits *BitSet) PeerState {
 // ----------------------------------------------------------------------------------
 
 type Peer struct {
-	queue *PeerQueue
-
-	// State of peer
-	state PeerState
-
-	// Overall torrent piece map
-	pieceMap *PieceMap
-
-	// ID
-	id *PeerIdentity
-
-	// Peer statistics concerning upload, download, etc...
+	queue      *PeerQueue
+	state      PeerState
+	pieceMap   *PieceMap
+	id         *PeerIdentity
 	statistics *Statistics
-
-	logger *log.Logger
+	logger     *log.Logger
 }
 
 func NewPeer(id *PeerIdentity,
@@ -153,14 +144,19 @@ func (p *Peer) onCancel(index, begin, length uint32) error {
 }
 
 func (p *Peer) onRequest(index, begin, length uint32) error {
-	// NOTE: Already on the way to disk...
-	// p.disk.Read(index, begin, length, p.id, p.queue.out)
+
+	// TODO: Check request valid
+	//	p.pieceMap.IsValid()
+
+	// Get block message and pass to disk to fill
+	p.disk.Read(index, begin, p.id)
 	return nil
 }
 
 func (p *Peer) onBlock(index, begin uint32, block []byte) error {
 	// NOTE: Already on the way to disk...
 	// p.disk.Write(index, begin, length, p.id)
+	p.disk.Write(index, begin, block)
 	p.Stats().Download.Add(len(block))
 	return nil
 }

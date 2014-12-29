@@ -1,13 +1,13 @@
 package bittorrent
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
 	"sync"
-	"bytes"
 )
 
 const (
@@ -52,17 +52,24 @@ var requestPool = &sync.Pool{
 	},
 }
 
+var blockPool = &sync.Pool{
+	New: func() interface{} {
+		// TODO: Fix this length calculation. Are we enforcing supporting requests of only 16Kb?
+		return &BlockMessage{GenericMessage{_16KB + 9, blockId, nil}, 0, 0, make([]byte, 0, _16KB)}
+	},
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Message list
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type MessageList struct {
 	msgs []ProtocolMessage
-	id *PeerIdentity
+	id   *PeerIdentity
 }
 
 func NewMessageList(id *PeerIdentity, msgs ...ProtocolMessage) *MessageList {
-	return &MessageList { msgs, id }
+	return &MessageList{msgs, id}
 }
 
 func (ml *MessageList) Add(pm ProtocolMessage) {
@@ -80,9 +87,9 @@ type ProtocolMessage interface {
 }
 
 type GenericMessage struct {
-	len    uint32
-	id     byte
-	pool   *sync.Pool
+	len  uint32
+	id   byte
+	pool *sync.Pool
 }
 
 func (m *GenericMessage) Id() byte {
@@ -298,12 +305,19 @@ func (m *BlockMessage) Block() []byte {
 }
 
 func Block(index, begin uint32, block []byte) *BlockMessage {
-	return &BlockMessage{
-		GenericMessage{uint32(9 + len(block)), blockId, nil},
-		index,
-		begin,
-		append(make([]byte, 0, len(block)), block...), // TODO: Should come from a pool!
-	}
+	b := blockPool.Get().(*BlockMessage)
+	b.index = index
+	b.begin = begin
+	copy(b.block[:0], block) // Reset len to zero and copy
+	return b
+}
+
+func EmptyBlock(index, begin uint32) *BlockMessage {
+	b := blockPool.Get().(*BlockMessage)
+	b.index = index
+	b.begin = begin
+	b.block = b.block[:0]
+	return b
 }
 
 func Marshal(pm ProtocolMessage, buf []byte) {
@@ -355,7 +369,7 @@ func Unmarshal(r *bytes.Buffer) ProtocolMessage {
 	}
 
 	// Do we have enough to unmarshal a message?
-	if r.Len() < int(msgLen) + 4 {
+	if r.Len() < int(msgLen)+4 {
 		return nil
 	}
 

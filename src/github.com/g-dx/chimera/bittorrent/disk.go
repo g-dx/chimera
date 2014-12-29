@@ -10,22 +10,27 @@ const (
 	BufLen = uint32(16 * 1024)
 )
 
-type DiskMessage interface {
+type DiskOp2 interface {
 	Id() *PeerIdentity
 }
 
-type DiskWriteMessage struct {
+type WriteOp2 struct {
 	id           *PeerIdentity
 	index, begin uint32
 	block        []byte
 }
 
-func (dw DiskWriteMessage) Id() *PeerIdentity {
+type ReadOp2 struct {
+	id                   *PeerIdentity
+	index, begin, length uint32
+}
+
+func (dw WriteOp2) Id() *PeerIdentity {
 	return dw.id
 }
 
-func DiskWrite(b *BlockMessage, id *PeerIdentity) *DiskWriteMessage {
-	return &DiskWriteMessage{
+func DiskWrite(b *BlockMessage, id *PeerIdentity) *WriteOp2 {
+	return &WriteOp2{
 		id:    id,
 		index: b.Index(),
 		begin: b.Begin(),
@@ -33,17 +38,12 @@ func DiskWrite(b *BlockMessage, id *PeerIdentity) *DiskWriteMessage {
 	}
 }
 
-type DiskReadMessage struct {
-	id                   *PeerIdentity
-	index, begin, length uint32
-}
-
-func (dm DiskReadMessage) Id() *PeerIdentity {
+func (dm ReadOp2) Id() *PeerIdentity {
 	return dm.id
 }
 
-func DiskRead(r *RequestMessage, id *PeerIdentity) *DiskReadMessage {
-	return &DiskReadMessage{
+func DiskRead(r *RequestMessage, id *PeerIdentity) *ReadOp2 {
+	return &ReadOp2{
 		id:     id,
 		index:  r.Index(),
 		begin:  r.Begin(),
@@ -51,7 +51,7 @@ func DiskRead(r *RequestMessage, id *PeerIdentity) *DiskReadMessage {
 	}
 }
 
-type DiskMessageResult interface {
+type DiskOp2Result interface {
 	Id() *PeerIdentity
 }
 
@@ -73,7 +73,7 @@ func (dwr DiskWriteResult) Id() *PeerIdentity {
 	return dwr.id
 }
 
-func mockDisk(reader <-chan DiskMessage, logger *log.Logger) {
+func mockDisk(reader <-chan DiskOp2, logger *log.Logger) {
 	for {
 		select {
 		case r := <-reader:
@@ -88,14 +88,14 @@ type DiskAccess struct {
 	files []*os.File
 	lens  []uint64
 	mi    *MetaInfo
-	in    <-chan DiskMessage
-	out   chan<- DiskMessageResult
+	in    <-chan DiskOp2
+	out   chan<- DiskOp2Result
 	log   *log.Logger
 }
 
 func NewDiskAccess(mi *MetaInfo,
-	in <-chan DiskMessage,
-	out chan<- DiskMessageResult,
+	in <-chan DiskOp2,
+	out chan<- DiskOp2Result,
 	dir string,
 	log *log.Logger) (*DiskAccess, error) {
 
@@ -177,14 +177,14 @@ func (da DiskAccess) loop() {
 		select {
 		case ioOp := <-da.in:
 
-			var res DiskMessageResult
+			var res DiskOp2Result
 			var err error
 
 			// Perform io op
 			switch msg := ioOp.(type) {
-			case *DiskReadMessage:
+			case *ReadOp2:
 				res, err = da.onReadMessage(msg)
-			case *DiskWriteMessage:
+			case *WriteOp2:
 				res, err = da.onWriteMessage(msg)
 			}
 
@@ -200,7 +200,7 @@ func (da DiskAccess) loop() {
 	}
 }
 
-func (da DiskAccess) onReadMessage(drm *DiskReadMessage) (DiskMessageResult, error) {
+func (da DiskAccess) onReadMessage(drm *ReadOp2) (DiskOp2Result, error) {
 	buf := make([]byte, 0, drm.length)
 	err := da.onIO(buf, drm.index, drm.begin, onReadBlock)
 	if err != nil {
@@ -209,7 +209,7 @@ func (da DiskAccess) onReadMessage(drm *DiskReadMessage) (DiskMessageResult, err
 	return &DiskReadResult{drm.Id(), Block(drm.index, drm.begin, buf)}, nil
 }
 
-func (da DiskAccess) onWriteMessage(drm *DiskWriteMessage) (DiskMessageResult, error) {
+func (da DiskAccess) onWriteMessage(drm *WriteOp2) (DiskOp2Result, error) {
 	err := da.onIO(drm.block, drm.index, drm.begin, onWriteBlock)
 	if err != nil {
 		return nil, err

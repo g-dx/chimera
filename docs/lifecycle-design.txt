@@ -1,0 +1,28 @@
+Error Handling
+--------------
+
+The following places can give rise to errors:
+
+- PeerConnection read - I/O
+- PeerConnection write - I/O
+- Peer.OnMessage() - invalid index, unknown message, etc
+- Disk.Read() - ???
+
+How do we close peer in:
+- PeerConnection read
+--> Close() connection which shuts down the 2 goroutines.
+--> Send error to protocol which will Close peer. This closes queue and returns all outstanding blocks.
+
+- PeerConnection write
+--> As above.
+
+- Peer.OnMessage()
+--> Close() peer. Close queue and return all outstanding blocks.
+--> Connection write should notice the closed channel and close the PeerConnection
+
+- What to do about outstanding disk reads/writes?
+--> Pass a a channel to send the result back on? How would the disk side know if the channel had been closed?
+--> Pass an operation which can be cancelled? All method pick up a mutex which then checks the isCancelled flag. That
+    means that all writes incur an additional cost of going through a mutex *as well* as the cost of writing on the
+    channel.
+-->
