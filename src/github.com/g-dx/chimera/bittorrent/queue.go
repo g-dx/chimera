@@ -27,7 +27,7 @@ type PeerQueue struct {
 func NewQueue(out chan ProtocolMessage, f func(int, int)) *PeerQueue {
 	q := &PeerQueue{
 		out:     out,
-		in:      make(chan ProtocolMessage),
+		in:      make(chan ProtocolMessage, maxQueuedMessages),
 		done:    make(chan struct{}),
 		choke:   make(chan chan []*RequestMessage),
 
