@@ -51,7 +51,6 @@ func (q *PeerQueue) Choke() []*RequestMessage {
 }
 
 func (q *PeerQueue) Close() []*RequestMessage {
-	q.done <- struct{}{}
 	close(q.done)
 	close(q.choke)
 	close(q.out)
@@ -88,8 +87,10 @@ func (q *PeerQueue) loop() {
 			}
 			q.next = nil
 		case _ = <- q.done:
+			q.drain()
 			return
 		case c := <- q.choke:
+			q.drain()
 			c <- q.onChoke()
 		}
 	}
@@ -129,4 +130,16 @@ func (q *PeerQueue) onChoke() []*RequestMessage {
 	}
 	q.pending = p
 	return reqs
+}
+
+func (q *PeerQueue) drain() {
+
+	for {
+		select {
+		case msg := <- q.in:
+			q.pending = append(q.pending, msg)
+		default:
+			return
+		}
+	}
 }
