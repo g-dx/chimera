@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"crypto/sha1"
 )
 
 const (
@@ -141,7 +142,7 @@ func handshake(infoHash []byte, peerId []byte) *HandshakeMessage {
 
 // Outgoing handshake
 func Handshake(infoHash []byte) *HandshakeMessage {
-	if len(infoHash) != 20 {
+	if len(infoHash) != sha1.Size {
 		panic(errors.New("Invalid info_hash length."))
 	}
 
