@@ -5,10 +5,7 @@ import (
 	"github.com/g-dx/chimera/bencode"
 	"io"
 	"runtime"
-)
-
-const (
-	sha1Length = 20
+	"crypto/sha1"
 )
 
 // Meta-info dictionary keys
@@ -136,15 +133,15 @@ func toMetaInfoFiles(info map[string]interface{}) []MetaInfoFile {
 func toSha1Hashes(pieces string) [][]byte {
 
 	// Check format/length
-	if len(pieces)%sha1Length != 0 {
+	if len(pieces)%sha1.Size != 0 {
 		panic(errPiecesValueMalformed)
 	}
 
-	hashes := make([][]byte, 0, len(pieces)/sha1Length)
+	hashes := make([][]byte, 0, len(pieces)/sha1.Size)
 	buf := []byte(pieces)
 	for len(buf) != 0 {
-		hashes = append(hashes, buf[:sha1Length])
-		buf = buf[sha1Length:]
+		hashes = append(hashes, buf[:sha1.Size])
+		buf = buf[sha1.Size:]
 	}
 	return hashes
 }
