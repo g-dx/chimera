@@ -4,132 +4,386 @@ import (
 	"io"
 	"log"
 	"os"
+	"crypto/sha1"
+	"bytes"
+	"errors"
+	"fmt"
+	"math"
 )
 
 const (
 	BufLen = uint32(16 * 1024)
 )
 
-type DiskOp2 interface {
-	Id() *PeerIdentity
+var errPieceHashIncorrect = errors.New("Piece hash was incorrect.")
+var empty = make([]DiskOp, 0)
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Disk Op
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type DiskOp interface {
 }
 
-type WriteOp2 struct {
-	id           *PeerIdentity
-	index, begin uint32
-	block        []byte
+type WriteOp *BlockMessage
+type ReadOp struct {
+	id    *PeerIdentity
+	block *BlockMessage
+}
+// TODO: Implement Cancel
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Disk Op Results
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type DiskOpResult interface {
 }
 
-type ReadOp2 struct {
-	id                   *PeerIdentity
-	index, begin, length uint32
+type ErrorResult struct {
+	op string
+	err error
 }
 
-func (dw WriteOp2) Id() *PeerIdentity {
-	return dw.id
+type WriteOk int
+type PieceOk int
+type HashFailed int
+
+type ReadOk struct {
+	id    *PeerIdentity
+	block *BlockMessage
 }
 
-func DiskWrite(b *BlockMessage, id *PeerIdentity) *WriteOp2 {
-	return &WriteOp2{
-		id:    id,
-		index: b.Index(),
-		begin: b.Begin(),
-		block: b.Block(),
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Disk Layout
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type DiskLayout struct {
+	files []File
+	pieceSize int
+	lastPieceSize int
+	size int64
+}
+
+func NewDiskLayout(files []File, pieceSize uint32, size uint64) *DiskLayout {
+	// Calculate details
+	lastPieceSize := int(size % uint64(pieceSize))
+	if lastPieceSize == 0 {
+		lastPieceSize = int(pieceSize)
 	}
+	return &DiskLayout{files, int(pieceSize), lastPieceSize, int64(size) }
 }
 
-func (dm ReadOp2) Id() *PeerIdentity {
-	return dm.id
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Disk
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type Disk struct {
+	in chan DiskOp
+	out chan DiskOpResult
+	done chan struct{}
+	io IO
 }
 
-func DiskRead(r *RequestMessage, id *PeerIdentity) *ReadOp2 {
-	return &ReadOp2{
-		id:     id,
-		index:  r.Index(),
-		begin:  r.Begin(),
-		length: r.Length(),
-	}
+func NewDisk(io IO, out chan DiskOpResult) *Disk {
+
+	// Create, start & return
+	disk := &Disk{make(chan DiskOp, 50), out, make(chan struct{}), io}
+	go disk.loop()
+	return disk
 }
 
-type DiskOp2Result interface {
-	Id() *PeerIdentity
-}
-
-type DiskReadResult struct {
-	id *PeerIdentity
-	b  *BlockMessage
-}
-
-func (drr DiskReadResult) Id() *PeerIdentity {
-	return drr.id
-}
-
-type DiskWriteResult struct {
-	id                   *PeerIdentity
-	index, begin, length uint32
-}
-
-func (dwr DiskWriteResult) Id() *PeerIdentity {
-	return dwr.id
-}
-
-func mockDisk(reader <-chan DiskOp2, logger *log.Logger) {
+func (d * Disk) loop() {
+	ops := empty
 	for {
+
+		// Execute any outstanding ops
+		for len(ops) != 0 {
+			ops = d.executeOp(ops)
+		}
+
+		// Read new ops
 		select {
-		case r := <-reader:
-			logger.Printf("Disk Read: %v\n", r)
-			//		case w := <- writer:
-			//			logger.Printf("Disk Write: %v\n", w)
+		case op := <- d.in:
+			ops = append(ops, op)
+
+		case <- d.done:
+			err := d.io.Close()
+			if err != nil {
+				// TODO: need channel to send err or nil
+			}
 		}
 	}
 }
 
-type DiskAccess struct {
-	files []*os.File
-	lens  []uint64
-	mi    *MetaInfo
-	in    <-chan DiskOp2
-	out   chan<- DiskOp2Result
+func (d * Disk) Read(id *PeerIdentity, block *BlockMessage) {
+	d.in <- ReadOp{id, block}
+}
+
+func (d * Disk) Write( block *BlockMessage) {
+	d.in <- WriteOp(block)
+}
+
+func (d * Disk) executeOp(ops []DiskOp) []DiskOp {
+
+	o := ops[0]
+	ops = ops[1:]
+
+ 	switch op := o.(type) {
+	case ReadOp:
+		err := d.io.ReadAt(op.block.block, int(op.block.index), int(op.block.begin))
+		if err != nil {
+			d.out <- ErrorResult{"read", err}
+		} else {
+			d.out <- ReadOk{op.id, op.block}
+		}
+	case WriteOp:
+		err := d.io.WriteAt(op.block, int(op.index), int(op.begin))
+		if err == errPieceHashIncorrect {
+			d.out <- HashFailed(int(op.index))
+		} else if err != nil {
+			d.out <- ErrorResult{"write", err}
+		} else {
+			d.out <- WriteOk(int(op.index))
+		}
+
+	default:
+		panic(fmt.Sprintf("unknown op: %v", op))
+	}
+	return ops
+}
+
+func (d * Disk) Close() error {
+	close(d.done)
+	// TODO: Should send channel for errors to come back on
+	return nil
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// IO Access
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type IO interface {
+	WriteAt(p []byte, index, off int) error
+	ReadAt(p []byte, index, off int) error
+	io.Closer
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// IO Caching
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type WriteBuffer struct {
+	buf []byte
+	*BitSet
+}
+
+type CacheIO struct {
+	io IO
+	blockSize int
+	layout *DiskLayout
+	out chan DiskOpResult
+	hashes [][]byte
+	w map[int]*WriteBuffer
+}
+
+func NewCacheIO(layout *DiskLayout, hashes[][]byte, blockSize int, out chan DiskOpResult, io IO) *CacheIO {
+	return &CacheIO{io, blockSize, layout, out, hashes, make(map[int]*WriteBuffer)}
+}
+
+func (ci * CacheIO) Close() error {
+	// TODO: Should we flush buffers?
+	return ci.io.Close()
+}
+
+func (ci * CacheIO) ReadAt(p []byte, index, off int) error {
+	// TODO: Implement read caching
+	return ci.io.ReadAt(p, index, off)
+}
+
+func (ci * CacheIO) WriteAt(p []byte, index, off int) error {
+	wb, ok := ci.w[index]
+	if !ok {
+
+		// Calculate size
+		size := ci.layout.pieceSize
+		if index == len(ci.hashes) - 1 {
+			size = ci.layout.lastPieceSize
+		}
+
+		// Calculate no of blocks
+		blocks := int(math.Ceil(float64(size) / float64(ci.blockSize)))
+
+		// Create new write buffer
+		wb = &WriteBuffer{make([]byte, size), NewBitSet(uint32(blocks))}
+		ci.w[index] = wb
+	}
+
+	// Check if we need this block
+	block := uint32(off / ci.blockSize)
+	if !wb.Have(block) {
+
+		copy(wb.buf[off:off+len(p)], p)
+		wb.Set(block)
+
+		// Are we done?
+		if wb.IsComplete() {
+
+			// Check hash
+			sha := sha1.New()
+			sha.Write(wb.buf)
+			if !bytes.Equal(ci.hashes[index], sha.Sum(nil)) {
+				return errPieceHashIncorrect
+			}
+
+			// Write piece
+			err := ci.io.WriteAt(wb.buf, index, 0)
+			if err != nil {
+				return err
+			}
+
+			// Send success & remove buffer
+			ci.out <- PieceOk(index)
+			delete(ci.w, index) // TODO: should be reused for cached reads
+		}
+	}
+
+	return nil
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Disk File
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+type File struct {
+	io.ReaderAt
+	io.WriterAt
+	io.Closer
+	len int64
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// Disk IO
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+// TODO: Rename to DiskIO
+type FileIO struct {
+	layout *DiskLayout
+	lens  []int64
 	log   *log.Logger
 }
 
-func NewDiskAccess(mi *MetaInfo,
-	in <-chan DiskOp2,
-	out chan<- DiskOp2Result,
-	dir string,
-	log *log.Logger) (*DiskAccess, error) {
+func NewFileIO(layout *DiskLayout, log *log.Logger) *FileIO {
 
-	// Read or create files
-	files, lens, err := initialise(mi.Files, dir)
-	if err != nil {
-		return nil, err
+	var l int64
+	lens := make([]int64, 0, len(files))
+
+	// Calculate continuous length
+	for _, f := range layout.files {
+		l += f.len
+		lens = append(lens, l)
 	}
 
 	// Create & start
-	da := &DiskAccess{
-		files: files,
+	da := &FileIO{
+		layout: layout,
 		lens:  lens,
-		mi:    mi,
-		in:    in,
-		out:   out,
 		log:   log,
 	}
-	go da.loop()
-	return da, nil
+	return da
 }
 
-func initialise(mif []MetaInfoFile, dir string) ([]*os.File, []uint64, error) {
+func (da *FileIO) WriteAt(p []byte, index, off int) error {
+	return da.onIO(p, index, off, onWriteBlock)
+}
 
-	var l uint64
-	lens := make([]uint64, 0, len(mif))
-	files := make([]*os.File, 0, len(mif))
+func (da *FileIO) ReadAt(p []byte, index, off int) error {
+	return da.onIO(p, index, off, onReadBlock)
+}
+
+func (da *FileIO) Close() error {
+	var err error
+	for _, f := range da.layout.files {
+		e := f.Close()
+		if err == nil && e != nil {
+			err = e
+		}
+	}
+	return err
+}
+
+func (da FileIO) onIO(buf []byte, index, begin int,
+	ioFn func(File, []byte, int64) (int, error)) error {
+
+	// Calculate starting positions
+	i, prev, off := da.initIO(index, begin)
+	pos := 0
+	for ; i < len(da.layout.files) ; i++ {
+
+		// Perform I/O
+		n, err := ioFn(da.layout.files[i], buf[pos:], off-prev)
+
+		da.log.Printf("I/O: \nfile: %v\noff: %v\nbuf: % X", da.layout.files[i], off-prev, buf[pos:pos+n])
+
+		if err != io.EOF {
+			return err
+		}
+
+		// Should we move to the next file?
+		pos += n
+		off += int64(n)
+		if err == io.EOF && pos != len(buf) {
+			da.log.Printf("I/O: Skipping to next file, %v bytes remaining", len(buf) - pos)
+			prev = da.lens[i]
+			continue
+		}
+
+		// Done
+		return nil
+	}
+
+	// Ran out of data
+	return io.ErrUnexpectedEOF
+}
+
+func (da * FileIO) initIO(index, begin int) (int, int64, int64) {
+
+	// Calc offset into files
+	off := int64(index * da.layout.pieceSize) + int64(begin)
+
+	// Calc len to previous file end
+	for i, len := range da.lens {
+		if off < len {
+			prev := int64(0)
+			if i > 0 {
+				prev = da.lens[i-1]
+			}
+			return i, prev, off
+		}
+	}
+	panic("Offset greater than length!")
+}
+
+func onReadBlock(f File, buf []byte, off int64) (int, error) {
+	return f.ReadAt(buf, off)
+}
+
+func onWriteBlock(f File, buf []byte, off int64) (int, error) {
+	return f.WriteAt(buf, off)
+}
+
+func CreateOrRead(mif []MetaInfoFile, dir string) ([]File, error) {
+
+	files := make([]File, 0, len(mif))
 
 	// Attempt to read files - if not present, create them
 	for _, f := range mif {
 
 		var file *os.File
 		fileDir := dir + "/" + f.Path
-		filePath := fileDir + f.Name
+		filePath := fileDir + "/" + f.Name
 
 		// Stat file to see if it exists
 		if _, err := os.Stat(filePath); os.IsExist(err) {
@@ -137,7 +391,7 @@ func initialise(mif []MetaInfoFile, dir string) ([]*os.File, []uint64, error) {
 			// Open existing file
 			file, err = os.Open(filePath)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 
 		} else {
@@ -145,124 +399,24 @@ func initialise(mif []MetaInfoFile, dir string) ([]*os.File, []uint64, error) {
 			// Create all dirs
 			err = os.MkdirAll(fileDir, os.ModeDir|os.ModePerm)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 
 			// Create new file
 			file, err = os.Create(filePath)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 
 			// Preallocate space
 			err = file.Truncate(int64(f.Length))
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 
-		// Calculate continuous length
-		l += f.Length
-		files = append(files, file)
-		lens = append(lens, l)
+		files = append(files, File{file, file, file, int64(f.Length)})
 	}
 
-	return files, lens, nil
-}
-
-func (da DiskAccess) loop() {
-	//	defer da.onExit
-
-	for {
-		select {
-		case ioOp := <-da.in:
-
-			var res DiskOp2Result
-			var err error
-
-			// Perform io op
-			switch msg := ioOp.(type) {
-			case *ReadOp2:
-				res, err = da.onReadMessage(msg)
-			case *WriteOp2:
-				res, err = da.onWriteMessage(msg)
-			}
-
-			// Check for error
-			if err != nil {
-
-				// TODO: panic? inform coordinator?
-				log.Printf("Disk Error: %v\n", err)
-				break
-			}
-			da.out <- res
-		}
-	}
-}
-
-func (da DiskAccess) onReadMessage(drm *ReadOp2) (DiskOp2Result, error) {
-	buf := make([]byte, 0, drm.length)
-	err := da.onIO(buf, drm.index, drm.begin, onReadBlock)
-	if err != nil {
-		return nil, err
-	}
-	return &DiskReadResult{drm.Id(), Block(drm.index, drm.begin, buf)}, nil
-}
-
-func (da DiskAccess) onWriteMessage(drm *WriteOp2) (DiskOp2Result, error) {
-	err := da.onIO(drm.block, drm.index, drm.begin, onWriteBlock)
-	if err != nil {
-		return nil, err
-	}
-	return &DiskWriteResult{drm.Id(), drm.index, drm.begin, uint32(len(drm.block))}, nil
-}
-
-func (da DiskAccess) onIO(buf []byte,
-	index, begin uint32,
-	ioFn func(*os.File, []byte, uint64) (int, error)) error {
-
-	start := (uint64(index) * uint64(da.mi.PieceLength)) + uint64(begin)
-	var bufOff uint64 = 0
-
-	for i, len := range da.lens {
-		if start <= len {
-
-			// Calculate offset & perform I/O
-			off := (start + bufOff) - da.mi.Files[i].Length
-			n, err := ioFn(da.files[i], buf[bufOff:], off)
-
-			// Reached end of file - move to next & continue
-			if err == io.EOF {
-				bufOff += uint64(n)
-				continue
-			}
-
-			// I/O error
-			if err != io.EOF {
-				return err
-			}
-
-			// No error - finished
-			return nil
-		}
-	}
-
-	return nil
-}
-
-func (da DiskAccess) onExit() {
-	for _, f := range da.files {
-		err := f.Close()
-		if err != nil {
-			da.log.Printf("Disk File Close Err: %v\n", err)
-		}
-	}
-}
-
-func onReadBlock(f *os.File, buf []byte, off uint64) (int, error) {
-	return f.ReadAt(buf, int64(off))
-}
-
-func onWriteBlock(f *os.File, buf []byte, off uint64) (int, error) {
-	return f.WriteAt(buf, int64(off))
+	return files, nil
 }

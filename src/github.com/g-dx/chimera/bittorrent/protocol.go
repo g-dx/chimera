@@ -37,6 +37,8 @@ type ProtocolHandler struct {
 	peerErrors       chan PeerError
 	isSeed           bool
 	requestTimer     *ProtocolRequestTimer
+	disk             *Disk
+	diskOps          chan DiskOpResult
 }
 
 func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*ProtocolHandler, error) {
@@ -47,6 +49,19 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 		return nil, err
 	}
 	logger := log.New(f, "", log.Ldate|log.Ltime)
+
+	// Create disk files
+	files, err := CreateOrRead(mi.Files, fmt.Sprintf("%v/files", dir))
+	if err != nil {
+		return nil, err
+	}
+
+	// Create disk
+	ops := make(chan DiskOpResult)
+	layout := NewDiskLayout(files, mi.PieceLength, mi.TotalLength())
+	fileio := NewFileIO(layout, logger)
+	cacheio := NewCacheIO(layout, mi.Hashes, int(_16KB), ops, fileio)
+	disk := NewDisk(cacheio, ops)
 
 	// Create piece map
 	pieceMap := NewPieceMap(uint32(len(mi.Hashes)), mi.PieceLength, mi.TotalLength())
@@ -64,6 +79,8 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 		peerMsgs:         make(chan *MessageList, 100),
 		peerErrors:       make(chan PeerError),
 		isSeed:           false,
+		disk:             disk,
+		diskOps:          ops,
 	}
 
 	// Start loop & return
@@ -74,6 +91,10 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 func (ph *ProtocolHandler) AwaitDone() {
 	// Await a receive to say we are finished...
 	<-ph.done
+}
+
+func (ph *ProtocolHandler) Close() {
+	// TODO: !!!
 }
 
 func (ph *ProtocolHandler) loop() {
@@ -95,11 +116,51 @@ func (ph *ProtocolHandler) loop() {
 			}
 
 		case e := <-ph.peerErrors:
-			ph.onPeerError(e.Id(), e.Error())
+			p := ph.findPeer(e.id)
+			if p != nil {
+				ph.closePeer(p, e.err)
+			}
 
 		case p := <-ph.newPeers:
 			ph.peers = append(ph.peers, p)
+
+		case d := <-ph.diskOps:
+			ph.onDisk(d)
 		}
+	}
+}
+
+func (ph *ProtocolHandler) onDisk(op DiskOpResult) {
+	switch r := op.(type) {
+	case ReadOk:
+		p := ph.findPeer(r.id)
+		if p != nil {
+			p.Add(r.block)
+			ph.logger.Printf("block [%v, %v] added to peer Q [%v]\n", r.block.index, r.block.begin, r.id)
+		}
+	case WriteOk:
+		// Nothing to do
+	case PieceOk:
+		ph.logger.Printf("piece [%v] written to disk\n", r)
+
+		// Mark piece as complete
+		ph.pieceMap.Get(uint32(r)).Complete()
+
+		// Send haves
+		for _, p := range ph.peers {
+			p.Add(Have(uint32(r)))
+		}
+
+		// Are we complete?
+		if ph.pieceMap.IsComplete() {
+			close(ph.done) // Yay!
+		}
+	case HashFailed:
+		// Reset piece
+		ph.pieceMap.Get(uint32(r)).Reset()
+
+	case ErrorResult:
+		ph.logger.Panicf("Disk [%v] Failed: %v\n", r.op, r.err)
 	}
 }
 
@@ -197,13 +258,6 @@ func (ph *ProtocolHandler) onTick(n int) {
 	PickPieces(ph.peers, ph.pieceMap, ph.requestTimer)
 }
 
-func (ph *ProtocolHandler) onPeerError(id *PeerIdentity, err error) {
-
-	p := ph.findPeer(id)
-	if p != nil {
-		ph.closePeer(p, err)
-	}
-}
 
 func (ph *ProtocolHandler) maybeConnect(r chan<- PeerConnectResult) {
 
