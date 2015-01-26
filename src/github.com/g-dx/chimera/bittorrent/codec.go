@@ -53,10 +53,13 @@ var requestPool = &sync.Pool{
 	},
 }
 
+// Used for clearing slices on reuse
+var emptyBlock = make([]byte, 0, _16KB)
+
 var blockPool = &sync.Pool{
 	New: func() interface{} {
 		// TODO: Fix this length calculation. Are we enforcing supporting requests of only 16Kb?
-		return &BlockMessage{GenericMessage{_16KB + 9, blockId, nil}, 0, 0, make([]byte, 0, _16KB)}
+		return &BlockMessage{GenericMessage{_16KB + 9, blockId, nil}, 0, 0, make([]byte, _16KB)}
 	},
 }
 
@@ -309,15 +312,17 @@ func Block(index, begin uint32, block []byte) *BlockMessage {
 	b := blockPool.Get().(*BlockMessage)
 	b.index = index
 	b.begin = begin
-	copy(b.block[:0], block) // Reset len to zero and copy
+	b.block = b.block[:len(block)] // Set slice to block len
+	copy(b.block, block)
 	return b
 }
 
+// TODO: possibly remove me..
 func EmptyBlock(index, begin uint32) *BlockMessage {
 	b := blockPool.Get().(*BlockMessage)
 	b.index = index
 	b.begin = begin
-	b.block = b.block[:0]
+	copy(b.block, emptyBlock)
 	return b
 }
 
@@ -338,7 +343,7 @@ func Marshal(pm ProtocolMessage, buf []byte) {
 	case *BlockMessage:
 		PutUint32(buf[5:9], msg.index)
 		PutUint32(buf[9:13], msg.begin)
-		copy(buf[13:len(msg.block)+13], msg.block)
+		copy(buf[13:13+len(msg.block)], msg.block)
 
 	case *RequestMessage:
 		PutUint32(buf[5:9], msg.index)
@@ -399,6 +404,7 @@ func Unmarshal(r *bytes.Buffer) ProtocolMessage {
 		index := Uint32(data[0:4])
 		begin := Uint32(data[4:8])
 		length := Uint32(data[8:12])
+		// TODO: If length is > 16Kb close connection?
 		return Request(index, begin, length)
 	case blockId:
 		index := Uint32(data[0:4])

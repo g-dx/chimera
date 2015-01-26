@@ -20,8 +20,8 @@ func TestEncode(t *testing.T) {
 	byteEquals(t, []byte{0, 0, 0, 4, 5, 1, 2, 3}, encodeTo(Bitfield([]byte{1, 2, 3})))
 	byteEquals(t, []byte{0, 0, 0, 13, 6, 0, 0, 0, 12, 0, 0, 0, 128, 0, 0, 32, 0},
 		encodeTo(Request(12, 128, 8192)))
-	byteEquals(t, []byte{0, 0, 0, 19, 7, 0, 0, 1, 0, 0, 0, 0, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-		encodeTo(Block(256, 10, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})))
+	byteEquals(t, []byte{0, 0, 64, 9, 7, 0, 0, 1, 0, 0, 0, 0, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		encodeTo(Block(256, 10, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}))[:23])
 	byteEquals(t, []byte{0, 0, 0, 13, 8, 0, 0, 0, 3, 0, 0, 3, 0, 0, 0, 181, 253},
 		encodeTo(Cancel(3, 768, 46589)))
 
