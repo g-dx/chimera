@@ -27,7 +27,7 @@ type PeerQueue struct {
 func NewQueue(out chan ProtocolMessage, f func(int, int)) *PeerQueue {
 	q := &PeerQueue{
 		out:     out,
-		in:      make(chan ProtocolMessage, maxQueuedMessages),
+		in:      make(chan ProtocolMessage),
 		done:    make(chan struct{}),
 		choke:   make(chan chan []*RequestMessage),
 
@@ -51,10 +51,11 @@ func (q *PeerQueue) Choke() []*RequestMessage {
 }
 
 func (q *PeerQueue) Close() []*RequestMessage {
+
+	reqs := q.Choke()
+
 	close(q.done)
-	close(q.choke)
-	close(q.out)
-	reqs := q.onChoke()
+
 	for _, msg := range q.pending {
 		msg.Recycle()
 	}
@@ -87,7 +88,8 @@ func (q *PeerQueue) loop() {
 			}
 			q.next = nil
 		case _ = <- q.done:
-			q.drain()
+			close(q.choke)
+			close(q.out)
 			return
 		case c := <- q.choke:
 			q.drain()
