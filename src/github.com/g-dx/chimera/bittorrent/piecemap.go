@@ -25,6 +25,15 @@ func NewPieceMap(n, pieceLen uint32, len uint64) *PieceMap {
 	return &PieceMap{pieces}
 }
 
+func (pm PieceMap) IsComplete() bool {
+	for _, p := range pm.pieces {
+		if !p.IsComplete() {
+			return false
+		}
+	}
+	return true
+}
+
 func (pm PieceMap) Get(i uint32) *Piece {
 	return pm.pieces[i]
 }
@@ -160,6 +169,14 @@ func (p Piece) RequestsRequired() bool {
 // Have all blocks been requested?
 func (p Piece) FullyRequested() bool {
 	return p.state == FULLY_REQUESTED
+}
+
+func (p Piece) Complete() {
+	p.state = COMPLETE
+}
+
+func (p Piece) Reset() {
+	p.state = NOT_STARTED
 }
 
 func (p Piece) Length() uint32 {
