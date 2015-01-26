@@ -54,3 +54,28 @@ The protocol is then waiting on:
 - ticks to run picker & choker
 - new incoming connections
 - newly established peers
+
+disk.Read(offset, size, output)
+ buffer := <- buffers // Blocking!
+ return ReadOp.New(buffer, offset, size, output)
+
+//-------------------------------------------------------------------------------------------------
+
+disk.Write(piece, offset, size, output)
+ buffer := <- buffers // Blocking
+ copy(piece, buffer)
+ return WriteOp.New(buffer, offset, size, output)
+
+connection.Write()
+select {
+ case <- close: closeImpl()
+ case <- keepAlive: flush();
+ case piece := <- pieces : buffer.add(piece) // Add or flush+grow
+ case protocol := <- protocol
+}
+
+ReadOp
+ select {
+  case <- cancel: cancel()
+  case out <- buffer:
+ }
