@@ -84,7 +84,7 @@ func (bs *BitSet) IsComplete() bool {
 	if bs.size%8 != 0 {
 		b = uint8(bs.size % 8)
 	}
-	bs.complete = bs.bits[len(bs.bits)-1] == (0xFF >> (8 - b))
+	bs.complete = int(bs.bits[len(bs.bits)-1]) == (0xFF << (8 - b) % 256)
 	return bs.complete
 }
 
