@@ -138,8 +138,7 @@ func (p *Peer) onHave(index uint32) error {
 }
 
 func (p *Peer) onCancel(index, begin, length uint32) error {
-	// NOTE: Handled lower down the stack...
-	// p.disk.Cancel(index, begin, length, p.id)
+	// TODO: Implement cancel support
 	return nil
 }
 
@@ -149,14 +148,14 @@ func (p *Peer) onRequest(index, begin, length uint32) error {
 	//	p.pieceMap.IsValid()
 
 	// Get block message and pass to disk to fill
-	p.disk.Read(index, begin, p.id)
+//	p.disk.Read(index, begin, p.id)
 	return nil
 }
 
 func (p *Peer) onBlock(index, begin uint32, block []byte) error {
 	// NOTE: Already on the way to disk...
 	// p.disk.Write(index, begin, length, p.id)
-	p.disk.Write(index, begin, block)
+//	p.disk.Write(index, begin, block)
 	p.Stats().Download.Add(len(block))
 	return nil
 }
@@ -200,7 +199,7 @@ func (p *Peer) Close() {
 
 	// ...
 
-	fmt.Printf("Peer (%v) closed.\n", p.id)
+	p.logger.Printf("Peer (%v) closed.\n", p.id)
 }
 
 func (p *Peer) QueuedRequests() int {
