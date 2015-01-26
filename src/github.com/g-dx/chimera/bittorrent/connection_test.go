@@ -42,6 +42,7 @@ func createTestPeerConnections(t testing.TB) (*PeerConnection, *PeerConnection) 
 
 	// Setup a goroutine for other side
 	res := make(chan *PeerConnection)
+	defer close(res)
 	go func() {
 		pc := <-c
 		establish(pc, infoHash, t)
