@@ -325,7 +325,7 @@ func (da FileIO) onIO(buf []byte, index, begin int,
 		// Perform I/O
 		n, err := ioFn(da.layout.files[i], buf[pos:], off-prev)
 
-		da.log.Printf("I/O: \nfile: %v\noff: %v\nbuf: % X", da.layout.files[i], off-prev, buf[pos:pos+n])
+//		da.log.Printf("I/O: \nfile: %v\noff: %v\nbuf: % X", da.layout.files[i], off-prev, buf[pos:pos+n])
 
 		if err != io.EOF {
 			return err
@@ -335,7 +335,7 @@ func (da FileIO) onIO(buf []byte, index, begin int,
 		pos += n
 		off += int64(n)
 		if err == io.EOF && pos != len(buf) {
-			da.log.Printf("I/O: Skipping to next file, %v bytes remaining", len(buf) - pos)
+//			da.log.Printf("I/O: Skipping to next file, %v bytes remaining", len(buf) - pos)
 			prev = da.lens[i]
 			continue
 		}
