@@ -1,0 +1,94 @@
+Goal:
+=====
+
+- Make all functions pure in codebase.
+
+Notes:
+======
+
+This will not be possible everywhere. That does not mean lots of the codebase would benefit from it.
+
+Areas of interest:
+=================
+
+Picker
+------
+
+Create copy of piecemap in function. Update each piece and return new piecemap at end. Even a 13Gb
+piecemap can be copied in < 1ms and this function only runs every 1 sec.
+
+func PickPieces(peers []*PeerState, pieceMap *PieceMap) (MessageList[])
+
+Choker
+------
+
+Instead of passing Peer interfaces we should pass PeerState instances which are copied on write.
+
+- func ChokePeers(isSeed bool, peers []*PeerState, changeOptimistic bool) ([]*PeerState, MessageList[])
+
+Peer
+----
+
+This would become:
+
+bittorrent.Handler interface {
+    onMessage(map PieceMap, cur PeerState) (new PeerState,
+                                            out []ProtocolMessage,
+                                            pieces []Piece,
+                                            disk []DiskMessage)
+}
+
+We return all modified pieces when handling a message. This probably means the piecemap needs to have a sync.Pool of
+old pieces for reuse.
+
+type PieceMap struct {
+    pieces []*Piece
+    pool sync.Pool
+}
+
+type PeerState struct {
+  ws WireState
+  bitfield *BitSet
+  counters *Counters
+}
+
+=> onChoke() returns
+ - PeerState(choked)
+ - []
+ - []
+ - []
+
+=> onHave() returns
+ - PeerState(interested)
+ - [Interested]
+ - [Piece(123, avail+1)]
+ - []
+
+=> onRequest() returns
+ - cur
+ - []
+ - []
+ - [DiskRead]
+=> onBlock() returns
+ - cur
+ - []
+ - []
+ - [DiskWrite]
+
+=> onCancel() return
+ - cur
+ - []
+ - []
+ - [DiskCancel]
+
+=> onBitfield() return
+ - cur
+ - [Interested]
+ - [Piece, Piece, Piece, Piece, Piece, ...]
+ - []
+
+Protocol
+--------
+
+onTick(map PieceMap, peers PeerState) (newMap PieceMap, newPeers Peers, out MessageList[])
+

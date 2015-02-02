@@ -53,6 +53,12 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequest
 			n := peer.QueuedRequests() + requestTimer.BlocksWaiting(*peer.Id())
 //			peer.logger.Println("peer: ", peer.Id(), " blocks outstanding: ", n)
 			TakeBlocks(pieces, 10 - n, peer)
+			/**
+			  reqs := requestsForNeededBlocks()
+			  for req : range reqs {
+			    newPieceMap.Get(req.index).SetBlock(REQUESTED)
+			  }
+			 */
 		}
 
 		// Clear peer list
@@ -75,4 +81,111 @@ func TakeBlocks(pieces []*Piece, numRequired int, p *Peer) {
 			p.Add(req)
 		}
 	}
+}
+
+func PickPieces2(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequestTimer) bool {
+
+	// Sort into fastest downloaders
+	sortedPeers := make([]*Peer, len(peers))
+	copy(sortedPeers, peers)
+	sort.Sort(ByDownloadSpeed(sortedPeers))
+
+	// For each unchoked & interesting peer calculate blocks to pick
+
+	taken := make(set)    // The blocks which have already been taken
+	complete := make(set) // The pieces whose block have are all requested or taken
+	picked := make(map[*Peer][]*RequestMessage) // The blocks picked for each peer
+
+	for _, peer := range peers {
+		if peer.CanDownload() {
+
+			// Find total required
+			n := peer.QueuedRequests() + requestTimer.BlocksWaiting(*peer.Id())
+
+			reqs := make([]*RequestMessage, 0, n)
+			for _, p := range availablePieces(complete, pieceMap, peer, n) {
+
+				// Pick all the pieces we can
+				blocks, done := pick(taken, p, n)
+
+				// Update taken blocks
+				for _, req := range blocks {
+					taken.Add(toOffset(p, int(req.begin/_16KB)))
+				}
+
+				// If we didn't complete the piece we must be done
+				if !done {
+					break
+				}
+
+				// Mark piece as done & continue
+				complete.Add(int64(p.index))
+			}
+
+			// Set picked pieces for peer
+			picked[peer] = reqs
+		}
+	}
+
+	return false
+}
+
+func availablePieces(complete set, pieceMap *PieceMap, peer *Peer, n int) []*Piece {
+	// Find all pieces which this peer has which still require blocks
+	pieces := make([]*Piece, 0, n)
+	for _, piece := range pieceMap.pieces {
+
+		// If this piece hasn't been completed already AND it isn't fully requested AND this peer has it
+		if !complete.Has(int64(piece.index)) && !piece.FullyRequested() && peer.state.bitfield.Have(piece.index) {
+			pieces = append(pieces, piece)
+		}
+
+		// Each piece must have at least one free block so take at most the number of blocks
+		if len(pieces) == n {
+			break
+		}
+	}
+
+	// Sort them
+	sort.Sort(ByPriority(pieces))
+	return pieces
+}
+
+
+func pick(taken set, p *Piece, wanted int) ([]*RequestMessage, bool) {
+
+	reqs := make([]*RequestMessage, 0, wanted)
+	for i, s := range p.blocks {
+
+		// If not already taken & needed
+		if !taken.Has(toOffset(p, i)) && s == NEEDED {
+
+			// Add request & check if we are done
+			reqs = append(reqs, Request(p.index, uint32(i)*_16KB, p.BlockLen(i)))
+			if len(reqs) == wanted {
+				return reqs, false
+			}
+		}
+	}
+	return reqs, true
+}
+
+// Return the global offset of a block within the entire file
+func toOffset(p *Piece, block int) int64 {
+	return int64(p.index) * int64(p.len) + int64(block * 16 * 1024) // TODO: Should use constant
+}
+
+// ============================================================================================================
+// Set
+// ============================================================================================================
+
+type set map[int64]struct{}
+
+func (b set) Has(i int64) bool {
+	_, has := b[i]
+	return has
+}
+
+func (b set) Add(i int64) {
+	b[i] = struct{}{}
 }

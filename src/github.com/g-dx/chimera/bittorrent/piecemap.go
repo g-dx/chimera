@@ -147,6 +147,14 @@ func NewPiece(i, len uint32) *Piece {
 	return &Piece{i, len, blocks, lastBlockLen, 0, NOT_STARTED}
 }
 
+func (p *Piece) BlockLen(block int) uint32 {
+	length := _16KB
+	if block == len(p.blocks)-1 {
+		length = p.lastBlockLen
+	}
+	return length
+}
+
 func (p *Piece) Priority() int {
 	if p.availability == 0 || p.state == FULLY_REQUESTED || p.state == COMPLETE {
 		return 0
