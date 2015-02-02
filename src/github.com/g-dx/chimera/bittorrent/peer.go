@@ -131,6 +131,7 @@ func (p *Peer) onHave(index uint32) error {
 		p.pieceMap.Inc(index)
 
 		if p.isNowInteresting(index) {
+			p.state.localInterest = true
 			p.queue.Add(Interested())
 		}
 	}
