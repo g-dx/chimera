@@ -1,94 +1,68 @@
-Goal:
-=====
+Refactor:
+=========
 
-- Make all functions pure in codebase.
++ Messages
+----------
 
-Notes:
-======
+Strip methods from messages. This allows them to become simple.
 
-This will not be possible everywhere. That does not mean lots of the codebase would benefit from it.
+type ProtocolMessage interface {}
+type Choke struct{}
+...
+type Have int
+type Request struct { index, begin, length }
+.. etc
 
-Areas of interest:
-=================
+func messageLength(pm ProtocolMessage) int {
 
-Picker
-------
-
-Create copy of piecemap in function. Update each piece and return new piecemap at end. Even a 13Gb
-piecemap can be copied in < 1ms and this function only runs every 1 sec.
-
-func PickPieces(peers []*PeerState, pieceMap *PieceMap) (MessageList[])
-
-Choker
-------
-
-Instead of passing Peer interfaces we should pass PeerState instances which are copied on write.
-
-- func ChokePeers(isSeed bool, peers []*PeerState, changeOptimistic bool) ([]*PeerState, MessageList[])
-
-Peer
-----
-
-This would become:
-
-bittorrent.Handler interface {
-    onMessage(map PieceMap, cur PeerState) (new PeerState,
-                                            out []ProtocolMessage,
-                                            pieces []Piece,
-                                            disk []DiskMessage)
 }
 
-We return all modified pieces when handling a message. This probably means the piecemap needs to have a sync.Pool of
-old pieces for reuse.
+func messageId(pm ProtocolMessage) int {
 
-type PieceMap struct {
-    pieces []*Piece
-    pool sync.Pool
 }
+
+This means we can drop sync.Pools for these types.
+
++ PeerWireState
+---------------
+
+Capture key protocol state in int
+
+type PeerWireState byte
+
+func (pws PeerWireState) choked() PeerWireState {
+    return pws << 1
+}
+
++ Pure
+------
+
+- Picker should be made side-effect free
+- Choker should be made side-effect free
+- Message handling probably can't be side-effect free without lots of work
+
++ PeerState
+-----------
 
 type PeerState struct {
-  ws WireState
-  bitfield *BitSet
-  counters *Counters
+    wire WireState
+    pending set[Block]
+    downloaded counter
+    uploaded counter
 }
 
-=> onChoke() returns
- - PeerState(choked)
- - []
- - []
- - []
+type Block uint64
+func toBlock(index, begin int) Block {
+    return uint64(index) * pieceSize + uint64(begin)
+    // do bitshifting?
+}
 
-=> onHave() returns
- - PeerState(interested)
- - [Interested]
- - [Piece(123, avail+1)]
- - []
++ MessageHandler
+---------------
 
-=> onRequest() returns
- - cur
- - []
- - []
- - [DiskRead]
-=> onBlock() returns
- - cur
- - []
- - []
- - [DiskWrite]
+onMessage(pm ProtocolMessage, p Peer, mp PieceMap, net chan<-ProtocolMessage, disk chan<- DiskMessage) (Peer)
 
-=> onCancel() return
- - cur
- - []
- - []
- - [DiskCancel]
++ Queue
+-------
 
-=> onBitfield() return
- - cur
- - [Interested]
- - [Piece, Piece, Piece, Piece, Piece, ...]
- - []
-
-Protocol
---------
-
-onTick(map PieceMap, peers PeerState) (newMap PieceMap, newPeers Peers, out MessageList[])
-
+- These need a channel to send blocks back to protocol on choke
