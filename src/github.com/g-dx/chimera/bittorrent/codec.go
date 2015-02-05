@@ -52,10 +52,6 @@ func NewMessageList(id *PeerIdentity, msgs ...ProtocolMessage) *MessageList {
 	return &MessageList{msgs, id}
 }
 
-func (ml *MessageList) Add(pm ProtocolMessage) {
-	ml.msgs = append(ml.msgs, pm)
-}
-
 // TODO - Decide whether to keep me
 type MsgList []ProtocolMessage
 
@@ -210,52 +206,58 @@ func Marshal(pm ProtocolMessage, buf []byte) {
 	}
 }
 
-func Unmarshal(r *bytes.Buffer) ProtocolMessage {
+func Unmarshal(r *bytes.Buffer) []ProtocolMessage {
 
-	// Do we have enough to calculate the length?
-	if r.Len() < msgLen {
-		return nil
-	}
+	var msgs []ProtocolMessage
+	for {
+		// Do we have enough to calculate the length?
+		if r.Len() < msgLen {
+			return msgs
+		}
 
-	// Check: Keepalive
-	payloadLen := Int(r.Bytes()[:msgLen])
-	if payloadLen == 0 {
+		// Check: Keepalive
+		payloadLen := Int(r.Bytes()[:msgLen])
+		if payloadLen == 0 {
+			r.Next(msgLen)
+			msgs = append(msgs, KeepAlive{})
+			continue
+		}
+
+		// Do we have enough to unmarshal a message?
+		if r.Len() < msgLen+payloadLen {
+			return msgs
+		}
+
+		// Discard header & read message
 		r.Next(msgLen)
-		return KeepAlive{}
-	}
+		bytes := r.Next(payloadLen)
 
-	// Do we have enough to unmarshal a message?
-	if r.Len() < msgLen+payloadLen {
-		return nil
-	}
-
-	// Discard header & read message
-	r.Next(msgLen)
-	bytes := r.Next(payloadLen)
-
-	// Build a message
-	messageId := bytes[0]
-	data := bytes[1:]
-	switch messageId {
-	case chokeId: return Choke{}
-	case unchokeId: return Unchoke{}
-	case interestedId: return Interested{}
-	case uninterestedId: return Uninterested{}
-	case haveId: return Have(Int(data))
-	case bitfieldId:
-		bits := make([]byte, len(data))
-		copy(bits, data)
-		return Bitfield(bits)
-	case requestId:
-		// TODO: If length is > 16Kb close connection?
-		return Request{Int(data[:4]), Int(data[4:8]), Int(data[8:12])}
-	case blockId:
-		block := make([]byte, len(data)-8)
-		copy(block, data[8:])
-		return Block{Int(data[:4]), Int(data[4:8]), block}
-	case cancelId: return Cancel{Int(data[:4]), Int(data[4:8]), Int(data[8:12])}
-	default:
-		return nil // Unknown message - skip - TODO: should log this.
+		// Build a message
+		messageId := bytes[0]
+		data := bytes[1:]
+		var msg ProtocolMessage
+		switch messageId {
+		case chokeId: msg = Choke{}
+		case unchokeId: msg = Unchoke{}
+		case interestedId: msg = Interested{}
+		case uninterestedId: msg = Uninterested{}
+		case haveId: msg = Have(Int(data))
+		case bitfieldId:
+			bits := make([]byte, len(data))
+			copy(bits, data)
+			msg = Bitfield(bits)
+		case requestId:
+			// TODO: If length is > 16Kb close connection?
+			msg = Request{Int(data[:4]), Int(data[4:8]), Int(data[8:12])}
+		case blockId:
+			block := make([]byte, len(data)-8)
+			copy(block, data[8:])
+			msg = Block{Int(data[:4]), Int(data[4:8]), block}
+		case cancelId: msg = Cancel{Int(data[:4]), Int(data[4:8]), Int(data[8:12])}
+		default:
+			continue // Unknown message - skip - TODO: should log this.
+		}
+		msgs = append(msgs, msg)
 	}
 }
 

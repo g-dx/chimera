@@ -219,7 +219,8 @@ func (ic *IncomingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, 
 	keepAlive := time.NewTimer(keepAlivePeriod)
 	for {
 		// Read for a max of 500ms
-		n, err := ic.readFor(buf, fiveHundredMills)
+		ic.conn.SetReadDeadline(time.Now().Add(fiveHundredMills))
+		n, err := buf.ReadFrom(ic.conn)
 		ic.log.Printf("Read [%v] bytes, error: %v", n, err)
 
 		if err != nil && !isTimeout(err) {
@@ -232,50 +233,23 @@ func (ic *IncomingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, 
 		}
 
 		// Decode messages & send if we have any
-		l := ic.decodeMessages(buf, id)
-		ic.log.Printf("Decoded [%v] messages", l)
-		if l != nil {
-			select {
-			case <-keepAlive.C:
-				panic(errKeepAliveExpired)
-			case <-ic.done:
-				ic.log.Println("Connection closed")
-				return
-			case ic.c <- l:
-			}
-		}
-	}
-	ic.log.Println("Loop exit")
-}
-
-func (ic *IncomingPeerConnection) readFor(buf *bytes.Buffer, d time.Duration) (int64, error) {
-	t := time.Now().Add(d)
-	ic.conn.SetReadDeadline(t)
-	n, err := buf.ReadFrom(ic.conn)
-	return n, err
-}
-
-func (ic *IncomingPeerConnection) decodeMessages(buf *bytes.Buffer, id *PeerIdentity) *MessageList {
-	var msgs *MessageList
-	var msg ProtocolMessage
-	for {
-		msg = Unmarshal(buf)
-		if msg == nil {
-			break
-		}
-		if msgs == nil {
-			msgs = NewMessageList(id)
-		}
-		kp := KeepAlive{}
-		if msg == kp {
+		msgs := Unmarshal(buf)
+		if len(msgs) == 0 {
 			continue
 		}
 
-		// Log and append
-		ic.log.Print(msg)
-		msgs.Add(msg)
+		l := &MessageList{msgs, id}
+		ic.log.Printf("Decoded [%v] messages", l)
+		select {
+		case <-keepAlive.C:
+			panic(errKeepAliveExpired)
+		case <-ic.done:
+			ic.log.Println("Connection closed")
+			return
+		case ic.c <- l:
+		}
 	}
-	return msgs
+	ic.log.Println("Loop exit")
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////

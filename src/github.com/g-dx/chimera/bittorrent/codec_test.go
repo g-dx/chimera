@@ -33,47 +33,45 @@ func TestDecode(t *testing.T) {
 
 	buf := bytes.NewBuffer([]byte{0, 0, 0, 0, 0, 0, 0, 1, 0})
 
-	pm := Unmarshal(buf)
-	msgEquals(t, KeepAlive{}, pm)
-	pm = Unmarshal(buf)
-	msgEquals(t, Choke{}, pm)
+	msgs := Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{KeepAlive{}, Choke{}}, msgs)
 
 	// Add more bytes
 	buf.Write([]byte{0, 0, 0, 1})
-	pm = Unmarshal(buf)
-	isNil(t, pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{}, msgs)
 
 	// Complete message
 	buf.WriteByte(1)
-	pm = Unmarshal(buf)
-	msgEquals(t, Unchoke{}, pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{Unchoke{}}, msgs)
 
 	buf.Write([]byte{0, 0, 0, 1, 2})
-	pm = Unmarshal(buf)
-	msgEquals(t, Interested{}, pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{Interested{}}, msgs)
 
 	buf.Write([]byte{0, 0, 0, 1, 3})
-	pm = Unmarshal(buf)
-	msgEquals(t, Uninterested{}, pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{Uninterested{}}, msgs)
 
 	buf.Write([]byte{0, 0, 0, 5, 4, 0, 0, 1, 1})
-	pm = Unmarshal(buf)
-	msgEquals(t, Have(257), pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{Have(257)}, msgs)
 
 	buf.Write([]byte{0, 0, 0, 4, 5, 1, 2, 3})
-	pm = Unmarshal(buf)
-	msgEquals(t, Bitfield([]byte{1, 2, 3}), pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{Bitfield([]byte{1, 2, 3})}, msgs)
 
 	buf.Write([]byte{0, 0, 0, 13, 6, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3})
-	pm = Unmarshal(buf)
-	msgEquals(t, Request{1, 2, 3}, pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{Request{1, 2, 3}}, msgs)
 
 	buf.Write([]byte{0, 0, 0, 14, 7, 0, 0, 0, 1, 0, 0, 0, 2, 255, 255, 255, 255, 255})
-	pm = Unmarshal(buf)
-	msgEquals(t, Block{1, 2, []byte{255, 255, 255, 255, 255}}, pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{Block{1, 2, []byte{255, 255, 255, 255, 255}}}, msgs)
 
 	buf.Write([]byte{0, 0, 0, 13, 8, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 6})
-	pm = Unmarshal(buf)
-	msgEquals(t, Cancel{4, 5, 6}, pm)
+	msgs = Unmarshal(buf)
+	msgEquals(t, []ProtocolMessage{Cancel{4, 5, 6}}, msgs)
 
 }
