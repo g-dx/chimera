@@ -90,6 +90,8 @@ func (p *Peer) OnMessage(pm ProtocolMessage) error {
 		return p.onRequest(msg.index, msg.begin, msg.length)
 	case Block:
 		return p.onBlock(msg.index, msg.begin, msg.block)
+	case KeepAlive:
+		return nil
 	default:
 		return newError(fmt.Sprintf("Unknown protocol message: %v", pm))
 	}
