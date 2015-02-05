@@ -45,11 +45,9 @@ func OnMessages(pm []ProtocolMessage, mp PieceMap, s *Statistics) (error, []Disk
 
 Maybe...?
 
-+ Simplify Outgoing Connection
-==============================
-Can be drastically simplified and corrected. Simple timer to drive buffer flushing. Do not set
-write deadlines and wait until message processing done before accepting new messages from upstream
-channel.
++ Deduplicate outgoing writes
+=============================
+The code to perform writes is duplicated.
 
 + Add Incoming&Outgoing Adaptive Buffer Sizing
 ==============================================
@@ -58,3 +56,12 @@ buffer size. Similarly if the flush timer causes network writes X times in a row
 less than half full halve the buffer size.
 
 Incoming not too sure....
+
++ Simpifly PeerIdentity
+=======================
+Currently this is a pointer to a struct. Really we want an opaque value. We can change this to be:
+
+type PeerIdentity string
+
+Which is immutable and can be passed around by value as a string is a glorified slice.
+TODO: We need to check if this does indeed result only copying a pointer?

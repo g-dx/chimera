@@ -20,6 +20,7 @@ var (
 
 	oneMegaByte      = 1 * 1024 * 1024
 	fiveHundredMills = 500 * time.Millisecond
+	_160KB = _16KB * 10
 
 	errHashesNotEquals      = errors.New("Info hashes not equal")
 	errHandshakeNotReceived = errors.New(fmt.Sprintf("Handshake not received in: %v", handshakeTimeout))
@@ -92,7 +93,7 @@ func createConnection(conn net.Conn) *PeerConnection {
 	return &PeerConnection{
 		close: c,
 		in:    IncomingPeerConnection{c, nil, conn, nil},
-		out:   OutgoingPeerConnection{c, nil, conn, make([]byte, 0), nil},
+		out:   OutgoingPeerConnection{c, nil, conn, nil},
 	}
 }
 
@@ -119,12 +120,13 @@ func (pc *PeerConnection) Establish(in chan ProtocolMessage,
 	pc.out.c = in
 
 	// Create buffers
+	// TODO: Rationalise these values
 	inBuf := bytes.NewBuffer(make([]byte, 0, oneMegaByte))
-	//out := bytes.NewBuffer(make([]byte, 0, oneMegaByte))
+	outBuf := bytes.NewBuffer(make([]byte, 0, _160KB))
 
 	// Start goroutines
 	go pc.in.loop(inBuf, e, id)
-	go pc.out.loop(e, id)
+	go pc.out.loop(outBuf, e, id)
 
 	pc.logger.Println("Established")
 	return id, nil
@@ -134,8 +136,7 @@ func (pc *PeerConnection) completeHandshake(handshake *HandshakeMessage, outgoin
 
 	var inHandshake *HandshakeMessage
 	if outgoing {
-		pc.out.curr = WriteHandshake(handshake)
-		pc.out.writeOrReceiveFor(handshakeTimeout)
+		WriteHandshake(pc.out.conn, handshake)
 		inHandshake, err = pc.readHandshake()
 		if err != nil {
 			return nil, err
@@ -145,8 +146,7 @@ func (pc *PeerConnection) completeHandshake(handshake *HandshakeMessage, outgoin
 		if err != nil {
 			return nil, err
 		}
-		pc.out.curr = WriteHandshake(handshake)
-		pc.out.writeOrReceiveFor(handshakeTimeout)
+		WriteHandshake(pc.out.conn, handshake)
 	}
 
 	// Assert hashes
@@ -260,74 +260,49 @@ type OutgoingPeerConnection struct {
 	close  <-chan struct{}
 	c      chan ProtocolMessage
 	conn   net.Conn
-	curr   []byte
 	logger *log.Logger
 }
 
-func (oc *OutgoingPeerConnection) loop(err chan<- PeerError, id *PeerIdentity) {
+func (oc *OutgoingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, id *PeerIdentity) {
 	defer onLoopExit(err, id)
-	var keepAlive = time.After(keepAlivePeriod)
+	keepAlive := time.After(keepAlivePeriod)
+	flushTimer := time.Tick(FIVE_HUNDRED_MILLIS)
+
+	b := make([]byte, _16KB+13) // Max size = Block(_16Kb)
 	for {
-		//		c := oc.maybeEnableReceive()
 		select {
 		case <-oc.close:
 			break
+
+		case <-flushTimer:
+			// Flush buffer
+			n, err := oc.conn.Write(buf.Bytes())
+			if err != nil {
+				panic(err) // TODO: Should only error in genuine case?
+			}
+			buf.Next(n)
+			keepAlive = time.After(keepAlivePeriod)
+
 		case <-keepAlive:
-			oc.append(KeepAlive{})
+			n := Marshal(KeepAlive{}, b)
+			buf.Write(b[:n])
+
 		case msg := <-oc.c:
-			oc.append(msg)
-		default:
-			if n := oc.writeOrReceiveFor(FIVE_HUNDRED_MILLIS); n > 0 {
+			// Flush buffer if no space
+			if (_160KB-buf.Len()) < 4+Len(msg) {
+				n, err := oc.conn.Write(buf.Bytes())
+				if err != nil {
+					panic(err) // TODO: Should only error in genuine case?
+				}
+				buf.Next(n)
 				keepAlive = time.After(keepAlivePeriod)
 			}
+			// Write message into buffer
+			n := Marshal(msg, b)
+			buf.Write(b[:n])
 		}
 	}
 	oc.logger.Println("Loop exit")
-}
-
-func (oc *OutgoingPeerConnection) maybeEnableReceive() <-chan ProtocolMessage {
-	var c <-chan ProtocolMessage
-	if len(oc.curr) == 0 {
-		c = oc.c
-	}
-	return c
-}
-
-func (oc *OutgoingPeerConnection) append(msg ProtocolMessage) {
-	oc.logger.Print(ToString(msg))
-	buffer := make([]byte, int(4+Len(msg)))
-	Marshal(msg, buffer)
-	oc.curr = append(oc.curr, buffer...)
-}
-
-func (oc *OutgoingPeerConnection) writeOrReceiveFor(d time.Duration) (bytes int) {
-
-	if len(oc.curr) == 0 {
-
-		// Receive until timeout
-		select {
-		case msg := <-oc.c:
-			buffer := make([]byte, int(4+Len(msg)))
-			Marshal(msg, buffer)
-			oc.curr = buffer
-		case <-time.After(d):
-		}
-	} else {
-
-		// Set deadline and write until timeout
-		t := time.Now().Add(ONE_HUNDRED_MILLIS)
-		oc.conn.SetWriteDeadline(t)
-		oc.logger.Printf("Set write deadline for [%v]", t)
-		timeout := false
-		n := 0
-		for !timeout && len(oc.curr) > 0 {
-			oc.curr, n, timeout = write(oc.conn, oc.curr)
-			oc.logger.Printf("Written [%v] bytes", n)
-			bytes += n
-		}
-	}
-	oc.logger.Printf("Total write [%v] bytes", bytes)
-	return bytes
 }
 
 func onLoopExit(c chan<- PeerError, id *PeerIdentity) {
@@ -339,27 +314,9 @@ func onLoopExit(c chan<- PeerError, id *PeerIdentity) {
 	}
 }
 
-// Actually does the write & checks for timeout
-func write(w io.Writer, buf []byte) ([]byte, int, bool) {
-	timeout := false
-	n, err := w.Write(buf)
-	if nil != err {
-		panicIfNotTimeout(err)
-		timeout = true
-	}
-	return buf[n:], n, timeout
-}
-
 func isTimeout(err error) bool {
 	opErr, ok := err.(*net.OpError)
 	return ok && opErr.Timeout()
-}
-
-// Panic if the error is not a timeout
-func panicIfNotTimeout(err error) {
-	if opErr, ok := err.(*net.OpError); ok && !opErr.Timeout() || !ok {
-		panic(err)
-	}
 }
 
 type ConnectionListener struct {

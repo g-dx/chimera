@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math"
 	"crypto/sha1"
+	"net"
+	"time"
 )
 
 const MaxInt = ^uint(0) >> 1
@@ -108,14 +110,21 @@ func Handshake(infoHash []byte) *HandshakeMessage {
 	return handshake(infoHash, PeerId)
 }
 
-func WriteHandshake(h *HandshakeMessage) []byte {
+func WriteHandshake(c net.Conn, h *HandshakeMessage) {
+	// Create buffer
 	buf := make([]byte, 0, handshakeLength)
 	buf = append(buf, byte(len(protocolName)))
 	buf = append(buf, []byte(protocolName)...)
 	buf = append(buf, make([]byte, 8)...)
 	buf = append(buf, h.infoHash...)
 	buf = append(buf, h.peerId...)
-	return buf
+
+	// Set timeout & write
+	c.SetWriteDeadline(time.Now().Add(handshakeTimeout))
+	_, err := c.Write(buf)
+	if err != nil {
+		panic(err) // TODO: Check failure to write everything is an error
+	}
 }
 
 func ReadHandshake(buf []byte) *HandshakeMessage {
@@ -171,12 +180,13 @@ type Block struct {
 	block []byte
 }
 
-func Marshal(pm ProtocolMessage, buf []byte) {
+func Marshal(pm ProtocolMessage, buf []byte) int {
 
 	// NOTE: buf is always guaranteed to be able to hold the message
 
 	// Add len & id
-	PutUint32(buf[0:4], Len(pm))
+	l := Len(pm)
+	PutUint32(buf[0:4], l)
 	id := Id(pm)
 	if id != 0 {
 		buf[4] = id
@@ -204,6 +214,7 @@ func Marshal(pm ProtocolMessage, buf []byte) {
 	case Bitfield:
 		copy(buf[5:len(msg)+5], msg)
 	}
+	return l+4
 }
 
 func Unmarshal(r *bytes.Buffer) []ProtocolMessage {
