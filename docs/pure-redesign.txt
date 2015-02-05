@@ -1,27 +1,5 @@
-Refactor:
+TODO:
 =========
-
-+ Messages
-----------
-
-Strip methods from messages. This allows them to become simple.
-
-type ProtocolMessage interface {}
-type Choke struct{}
-...
-type Have int
-type Request struct { index, begin, length }
-.. etc
-
-func messageLength(pm ProtocolMessage) int {
-
-}
-
-func messageId(pm ProtocolMessage) int {
-
-}
-
-This means we can drop sync.Pools for these types.
 
 + PeerWireState
 ---------------
