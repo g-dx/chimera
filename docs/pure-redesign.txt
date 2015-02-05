@@ -2,8 +2,7 @@ TODO:
 =========
 
 + PeerWireState
----------------
-
+===============
 Capture key protocol state in int
 
 type PeerWireState byte
@@ -11,6 +10,8 @@ type PeerWireState byte
 func (pws PeerWireState) choked() PeerWireState {
     return pws << 1
 }
+
+etc
 
 + Pure
 ------
@@ -35,17 +36,25 @@ func toOffset(index, begin int) BlockOffset {
     // do bitshifting?
 }
 
-+ MessageHandler
----------------
-
-onMessage(pm ProtocolMessage, p Peer, mp PieceMap, net chan<-ProtocolMessage, disk chan<- DiskMessage) (Peer)
-
-+ Peer
-------
-
++ Batch Peer Message Handling
+=============================
 Again adopt the batching technique. Pass the entire message list to Peer.onMessage(...) so that we don't copy-by-value
 for Cancel, Request, etc... The signature of the new method should probably be:
 
 func OnMessages(pm []ProtocolMessage, mp PieceMap, s *Statistics) (error, []DiskOp, []ProtocolMessage, WireState) {}
 
 Maybe...?
+
++ Simplify Outgoing Connection
+==============================
+Can be drastically simplified and corrected. Simple timer to drive buffer flushing. Do not set
+write deadlines and wait until message processing done before accepting new messages from upstream
+channel.
+
++ Add Incoming&Outgoing Adaptive Buffer Sizing
+==============================================
+Straightforward for outgoing. If we flush before the flush timer fires X times in a row then double
+buffer size. Similarly if the flush timer causes network writes X times in a row and the buffer is
+less than half full halve the buffer size.
+
+Incoming not too sure....
