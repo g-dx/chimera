@@ -62,21 +62,6 @@ func toOffset(index, begin int) BlockOffset {
 
 onMessage(pm ProtocolMessage, p Peer, mp PieceMap, net chan<-ProtocolMessage, disk chan<- DiskMessage) (Peer)
 
-+ Queue
--------
-
-- These need a channel to send blocks back to protocol on choke
-
-+ Connection & Decode
----------------------
-
-Can all be drastically simplified. Unmarshall should perform the looping and decode as many messages as possible. It
-then returns a []ProtocolMessage. This also prevents copy-by-value for the new message types.
-
-The incoming connection code then becomes a lots simpler (we can remove both methods).
-
-Peer will need to be updated to skip KeepAlive messages.
-
 + Peer
 ------
 
