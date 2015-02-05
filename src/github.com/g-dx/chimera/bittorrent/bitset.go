@@ -10,13 +10,13 @@ var bitMasks = [8]byte{128, 64, 32, 16, 8, 4, 2, 1}
 
 type BitSet struct {
 	bits     []byte
-	size     uint32
+	size     int
 	complete bool
 }
 
 var errSpareBitsSet = errors.New("Detected one or more spare bits set.")
 
-func NewBitSet(size uint32) *BitSet {
+func NewBitSet(size int) *BitSet {
 
 	// Ensure we have enough storage
 	len := size / 8
@@ -27,10 +27,10 @@ func NewBitSet(size uint32) *BitSet {
 	return &BitSet{make([]uint8, len), size, false}
 }
 
-func NewBitSetFrom(bits []byte, size uint32) (*BitSet, error) {
+func NewBitSetFrom(bits []byte, size int) (*BitSet, error) {
 
 	// Ensure spare bits are not set
-	if i := uint32(size % 8); i != 0 {
+	if i := size % 8; i != 0 {
 		for ; i < 8; i++ {
 			if bits[len(bits)-1]&bitMasks[i] != 0 {
 				return nil, errSpareBitsSet
@@ -43,7 +43,7 @@ func NewBitSetFrom(bits []byte, size uint32) (*BitSet, error) {
 	return bs, nil
 }
 
-func (bs BitSet) Have(i uint32) bool {
+func (bs BitSet) Have(i int) bool {
 	if !bs.IsValid(i) {
 		return false
 	}
@@ -51,17 +51,17 @@ func (bs BitSet) Have(i uint32) bool {
 	return (bs.bits[i/8] & bitMasks[i%8]) == bitMasks[i%8]
 }
 
-func (bs BitSet) Size() uint32 {
+func (bs BitSet) Size() int {
 	return bs.size
 }
 
-func (bs *BitSet) Set(i uint32) {
+func (bs *BitSet) Set(i int) {
 	if bs.IsValid(i) && !bs.Have(i) {
 		bs.bits[i/8] = bs.bits[i/8] | bitMasks[i%8]
 	}
 }
 
-func (bs BitSet) IsValid(i uint32) bool {
+func (bs BitSet) IsValid(i int) bool {
 	return i >= 0 && i < bs.size
 }
 

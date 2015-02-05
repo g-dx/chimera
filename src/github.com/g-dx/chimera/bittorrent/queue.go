@@ -45,10 +45,12 @@ func bufferImpl(in chan BufferMessage, out chan ProtocolMessage) {
 
 		// Upstream receive
 		case msg := <- in:
-			switch m := msg.(type) {
 
-			case AddMessage:
-				pending = append(pending, m)
+			switch m := msg.(type) {
+			case CloseMessage:
+				close(in)
+				close(out)
+				return
 
 			case FilterMessage:
 				tmp := pending[:0]
@@ -59,10 +61,8 @@ func bufferImpl(in chan BufferMessage, out chan ProtocolMessage) {
 				}
 				pending = tmp
 
-			case CloseMessage:
-				close(in)
-				close(out)
-				return
+			case AddMessage:
+				pending = append(pending, m)
 
 			default:
 				panic(fmt.Sprintf("Unknown buffer message: %v", msg))
@@ -83,7 +83,7 @@ type PeerQueue struct {
 	out  chan<- ProtocolMessage
 	in   chan ProtocolMessage
 	done chan struct{}
-	choke chan chan []*RequestMessage
+	choke chan chan []Request
 
 	pending []ProtocolMessage
 	next ProtocolMessage
@@ -96,7 +96,7 @@ func NewQueue(out chan ProtocolMessage, f func(int, int)) *PeerQueue {
 		out:     out,
 		in:      make(chan ProtocolMessage),
 		done:    make(chan struct{}),
-		choke:   make(chan chan []*RequestMessage),
+		choke:   make(chan chan []Request),
 
 		pending: make([]ProtocolMessage, 0, maxQueuedMessages),
 		onRequestSent : f,
@@ -109,26 +109,18 @@ func (q *PeerQueue) Add(pm ProtocolMessage) { q.in <- pm }
 
 func (q *PeerQueue) QueuedRequests() int { return int(atomic.LoadInt32(&q.reqs)) }
 
-func (q *PeerQueue) Choke() []*RequestMessage {
-	c := make(chan []*RequestMessage)
+func (q *PeerQueue) Choke() []Request {
+	c := make(chan []Request)
 	q.choke <- c
 	reqs := <- c
 	close(c)
 	return reqs
 }
 
-func (q *PeerQueue) Close() []*RequestMessage {
+func (q *PeerQueue) Close() []Request {
 
 	reqs := q.Choke()
-
 	close(q.done)
-
-	for _, msg := range q.pending {
-		msg.Recycle()
-	}
-	if q.next != nil {
-		q.next.Recycle()
-	}
 	return reqs
 }
 
@@ -145,7 +137,7 @@ func (q *PeerQueue) loop() {
 		select {
 		case msg := <- q.in:
 			q.pending = append(q.pending, msg)
-			if _, ok := msg.(*RequestMessage); ok {
+			if _, ok := msg.(Request); ok {
 				atomic.AddInt32(&q.reqs, 1)
 			}
 		case q.out <- q.next:
@@ -172,26 +164,26 @@ func (q *PeerQueue) maybeEnableSend() (int, int, bool) {
 		q.next = q.pending[0]
 		q.pending = q.pending[1:]
 
-		if req, ok := q.next.(*RequestMessage); ok {
-			index = int(req.Index())
-			begin = int(req.Begin())
+		if req, ok := q.next.(Request); ok {
+			index = req.index
+			begin = req.begin
 			isReq = true
 		}
 	}
 	return index, begin, isReq
 }
 
-func (q *PeerQueue) onChoke() []*RequestMessage {
-	reqs := make([]*RequestMessage, 0, 5)
+func (q *PeerQueue) onChoke() []Request {
+	reqs := make([]Request, 0, 5)
 	p := q.pending[:0]
 
-	if req, ok := q.next.(*RequestMessage); ok {
+	if req, ok := q.next.(Request); ok {
 		reqs = append(reqs, req)
 		q.next = nil
 	}
 
 	for _, msg := range q.pending {
-		if req, ok := msg.(*RequestMessage); ok {
+		if req, ok := msg.(Request); ok {
 			reqs = append(reqs, req)
 		} else {
 			p = append(p, msg)

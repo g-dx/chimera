@@ -11,7 +11,7 @@ func TestNewPieceMap(t *testing.T) {
 	pm := NewPieceMap(26, 524288, 13207200)
 	intEquals(t, 26, len(pm.pieces))
 
-	for i := uint32(0); i < 25; i++ {
+	for i := 0; i < 25; i++ {
 		p := pm.Get(i)
 		intEquals(t, 32, len(p.blocks))
 	}
@@ -23,16 +23,16 @@ func TestNewPieceMap(t *testing.T) {
 func TestNewRegularPiece(t *testing.T) {
 
 	// 1 - 10 = 16Kb
-	i := uint32(0)
-	l := uint32(163840)
+	i := 0
+	l := 163840
 	p := NewPiece(i, l)
 	intEquals(t, 10, len(p.blocks))
 	intEquals(t, 0, p.Priority())
 	boolEquals(t, true, p.RequestsRequired())
 	boolEquals(t, false, p.FullyRequested())
 	boolEquals(t, false, p.IsComplete())
-	uint32Equals(t, l, p.len)
-	uint32Equals(t, _16KB, p.lastBlockLen)
+	intEquals(t, l, p.len)
+	intEquals(t, _16KB, p.lastBlockLen)
 
 	// Check all requests
 	r := p.TakeBlocks(10)
@@ -40,21 +40,21 @@ func TestNewRegularPiece(t *testing.T) {
 
 	// Requests 1 - 10
 	for j, req := range r {
-		t.Logf("%v", *req)
-		uint32Equals(t, i, req.Index())
-		uint32Equals(t, _16KB*uint32(j), req.Begin())
-		uint32Equals(t, _16KB, req.Length())
+		t.Logf("%v", req)
+		intEquals(t, i, req.index)
+		intEquals(t, _16KB*j, req.begin)
+		intEquals(t, _16KB, req.length)
 	}
 }
 
 func TestNewIrregularPiece(t *testing.T) {
 
 	// 1 - 10 = 16Kb, 11 = 124b
-	i := uint32(0)
-	l := uint32(163964)
+	i := 0
+	l := 163964
 	p := NewPiece(i, l)
 	intEquals(t, 11, len(p.blocks))
-	uint32Equals(t, 124, p.lastBlockLen)
+	intEquals(t, 124, p.lastBlockLen)
 
 	// Check all requests
 	r := p.TakeBlocks(11)
@@ -63,24 +63,24 @@ func TestNewIrregularPiece(t *testing.T) {
 	// Requests 1 - 10
 	for j, req := range r {
 		if j != 10 {
-			uint32Equals(t, i, req.Index())
-			uint32Equals(t, _16KB*uint32(j), req.Begin())
-			uint32Equals(t, _16KB, req.Length())
+			intEquals(t, i, req.index)
+			intEquals(t, _16KB*j, req.begin)
+			intEquals(t, _16KB, req.length)
 		}
 	}
 
 	// Request 11
 	req := r[10]
-	uint32Equals(t, i, req.Index())
-	uint32Equals(t, _16KB*10, req.Begin())
-	uint32Equals(t, 124, req.Length())
+	intEquals(t, i, req.index)
+	intEquals(t, _16KB*10, req.begin)
+	intEquals(t, 124, req.length)
 }
 
 func TestPieceStateAndPriority(t *testing.T) {
 
 	// Create piece, set availability
 	blocks := 10
-	p := NewPiece(0, _16KB*uint32(blocks))
+	p := NewPiece(0, _16KB*blocks)
 	p.availability = 5
 	notStartedPriority := p.Priority()
 

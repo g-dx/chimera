@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync"
 	"crypto/sha1"
 )
+
+const MaxInt = ^uint(0) >> 1
+const msgLen = 4
 
 const (
 	// message ids (0 ... 9)
@@ -26,42 +28,16 @@ const (
 
 const (
 	// Fixed message lengths
-	keepAliveLength    uint32 = 0
-	chokeLength        uint32 = 1
-	unchokeLength      uint32 = 1
-	interestedLength   uint32 = 1
-	uninterestedLength uint32 = 1
-	haveLength         uint32 = 5
-	cancelLength       uint32 = 13
-	requestLength      uint32 = 13
-	handshakeLength    uint32 = 68
+	keepAliveLength    int = 0
+	chokeLength        int = 1
+	unchokeLength      int = 1
+	interestedLength   int = 1
+	uninterestedLength int = 1
+	haveLength         int = 5
+	cancelLength       int = 13
+	requestLength      int = 13
+	handshakeLength    int = 68
 )
-
-////////////////////////////////////////////////////////////////////////////////////////////////
-// Message Pools
-////////////////////////////////////////////////////////////////////////////////////////////////
-
-var havePool = &sync.Pool{
-	New: func() interface{} {
-		return &HaveMessage{GenericMessage{haveLength, haveId, nil}, 0}
-	},
-}
-
-var requestPool = &sync.Pool{
-	New: func() interface{} {
-		return &RequestMessage{BlockDetailsMessage{GenericMessage{requestLength, requestId, nil}, 0, 0, 0}}
-	},
-}
-
-// Used for clearing slices on reuse
-var emptyBlock = make([]byte, 0, _16KB)
-
-var blockPool = &sync.Pool{
-	New: func() interface{} {
-		// TODO: Fix this length calculation. Are we enforcing supporting requests of only 16Kb?
-		return &BlockMessage{GenericMessage{_16KB + 9, blockId, nil}, 0, 0, make([]byte, _16KB)}
-	},
-}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Message list
@@ -80,34 +56,18 @@ func (ml *MessageList) Add(pm ProtocolMessage) {
 	ml.msgs = append(ml.msgs, pm)
 }
 
+// TODO - Decide whether to keep me
+type MsgList []ProtocolMessage
+
+func Msgs(msgs ...ProtocolMessage) MsgList {
+	return MsgList(msgs)
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Basic message
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type ProtocolMessage interface {
-	Id() byte
-	Len() uint32
-	Recycle()
-}
-
-type GenericMessage struct {
-	len  uint32
-	id   byte
-	pool *sync.Pool
-}
-
-func (m *GenericMessage) Id() byte {
-	return m.id
-}
-
-func (m *GenericMessage) Len() uint32 {
-	return m.len
-}
-
-func (m *GenericMessage) Recycle() {
-	if m.pool != nil {
-		m.pool.Put(m)
-	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -172,9 +132,7 @@ func ReadHandshake(buf []byte) *HandshakeMessage {
 // KeepAlive <len=0000>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type KeepAliveMessage struct{ GenericMessage }
-
-var KeepAlive = &KeepAliveMessage{GenericMessage{keepAliveLength, 0, nil}}
+type KeepAlive struct{}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Choke        <len=0001><id=0>
@@ -183,147 +141,38 @@ var KeepAlive = &KeepAliveMessage{GenericMessage{keepAliveLength, 0, nil}}
 // Uninterested <len=0001><id=3>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type ChokeMessage struct{ GenericMessage }
-type UnchokeMessage struct{ GenericMessage }
-type InterestedMessage struct{ GenericMessage }
-type UninterestedMessage struct{ GenericMessage }
-
-func Choke() ProtocolMessage {
-	return &ChokeMessage{GenericMessage{chokeLength, chokeId, nil}}
-}
-
-func Unchoke() ProtocolMessage {
-	return &UnchokeMessage{GenericMessage{unchokeLength, unchokeId, nil}}
-}
-
-func Interested() ProtocolMessage {
-	return &InterestedMessage{GenericMessage{interestedLength, interestedId, nil}}
-}
-
-func Uninterested() ProtocolMessage {
-	return &UninterestedMessage{GenericMessage{uninterestedLength, uninterestedId, nil}}
-}
+type Choke struct{}
+type Unchoke struct{}
+type Interested struct{}
+type Uninterested struct{}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Have <len=0005><id=4><piece index>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type HaveMessage struct {
-	GenericMessage
-	index uint32
-}
-
-func (m *HaveMessage) Index() uint32 {
-	return m.index
-}
-
-func Have(i uint32) *HaveMessage {
-	have := havePool.Get().(*HaveMessage)
-	have.index = i
-	have.pool = havePool
-	return have
-}
+type Have int
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Bitfield: <len=0001+X><id=5><bitfield>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type BitfieldMessage struct {
-	GenericMessage
-	bits []byte
-}
-
-func (m *BitfieldMessage) Bits() []byte {
-	return m.bits
-}
-
-func Bitfield(bits []byte) *BitfieldMessage {
-	return &BitfieldMessage{GenericMessage{uint32(1 + len(bits)), bitfieldId, nil}, bits}
-}
+type Bitfield []byte
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Request <len=0013><id=6><index><begin><length>
 // Cancel <len=0013><id=8><index><begin><length>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type BlockDetailsMessage struct {
-	GenericMessage
-	index, begin, length uint32
-}
-
-func (m *BlockDetailsMessage) Index() uint32 {
-	return m.index
-}
-
-func (m *BlockDetailsMessage) Begin() uint32 {
-	return m.begin
-}
-
-func (m *BlockDetailsMessage) Length() uint32 {
-	return m.length
-}
-
-type CancelMessage struct{ BlockDetailsMessage }
-type RequestMessage struct{ BlockDetailsMessage }
-
-func Request(index, begin, length uint32) *RequestMessage {
-	req := requestPool.Get().(*RequestMessage)
-	req.index = index
-	req.begin = begin
-	req.length = length
-	req.pool = requestPool
-	return req
-}
-
-func Cancel(index, begin, length uint32) *CancelMessage {
-	return &CancelMessage{
-		BlockDetailsMessage{
-			GenericMessage{cancelLength, cancelId, nil},
-			index,
-			begin,
-			length,
-		},
-	}
-}
+type Cancel struct{ index, begin, length int }
+type Request struct{ index, begin, length int }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Piece <len=0009+X><id=7><index><begin><block>
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type BlockMessage struct {
-	GenericMessage
-	index, begin uint32
-	block        []byte
-}
-
-func (m *BlockMessage) Index() uint32 {
-	return m.index
-}
-
-func (m *BlockMessage) Begin() uint32 {
-	return m.begin
-}
-
-func (m *BlockMessage) Block() []byte {
-	return m.block
-}
-
-func Block(index, begin uint32, block []byte) *BlockMessage {
-	b := blockPool.Get().(*BlockMessage)
-	b.index = index
-	b.begin = begin
-	b.block = b.block[:len(block)] // Set slice to block len
-	copy(b.block, block)
-	return b
-}
-
-// TODO: possibly remove me..
-func EmptyBlock(index, begin uint32) *BlockMessage {
-	b := blockPool.Get().(*BlockMessage)
-	b.index = index
-	b.begin = begin
-	copy(b.block, emptyBlock)
-	return b
+type Block struct {
+	index, begin int
+	block []byte
 }
 
 func Marshal(pm ProtocolMessage, buf []byte) {
@@ -331,138 +180,145 @@ func Marshal(pm ProtocolMessage, buf []byte) {
 	// NOTE: buf is always guaranteed to be able to hold the message
 
 	// Add len & id
-	PutUint32(buf[0:4], pm.Len())
-	if pm.Id() != 0 {
-		buf[4] = pm.Id()
+	PutUint32(buf[0:4], Len(pm))
+	id := Id(pm)
+	if id != 0 {
+		buf[4] = id
 	}
 
 	switch msg := pm.(type) {
-	case *HaveMessage:
-		PutUint32(buf[5:9], msg.index)
+	case Have:
+		PutUint32(buf[5:9], int(msg))
 
-	case *BlockMessage:
+	case Block:
 		PutUint32(buf[5:9], msg.index)
 		PutUint32(buf[9:13], msg.begin)
 		copy(buf[13:13+len(msg.block)], msg.block)
 
-	case *RequestMessage:
+	case Request:
 		PutUint32(buf[5:9], msg.index)
 		PutUint32(buf[9:13], msg.begin)
 		PutUint32(buf[13:17], msg.length)
 
-	case *CancelMessage:
+	case Cancel:
 		PutUint32(buf[5:9], msg.index)
 		PutUint32(buf[9:13], msg.begin)
 		PutUint32(buf[13:17], msg.length)
 
-	case *BitfieldMessage:
-		copy(buf[5:len(msg.bits)+5], msg.bits)
+	case Bitfield:
+		copy(buf[5:len(msg)+5], msg)
 	}
 }
 
 func Unmarshal(r *bytes.Buffer) ProtocolMessage {
 
 	// Do we have enough to calculate the length?
-	if r.Len() < 4 {
+	if r.Len() < msgLen {
 		return nil
 	}
 
 	// Check: Keepalive
-	msgLen := Uint32(r.Bytes()[0:4])
-	if msgLen == 0 {
-		r.Next(4)
-		return KeepAlive
+	payloadLen := Int(r.Bytes()[:msgLen])
+	if payloadLen == 0 {
+		r.Next(msgLen)
+		return KeepAlive{}
 	}
 
 	// Do we have enough to unmarshal a message?
-	if r.Len() < int(msgLen)+4 {
+	if r.Len() < msgLen+payloadLen {
 		return nil
 	}
 
 	// Discard header & read message
-	r.Next(4)
-	bytes := r.Next(int(msgLen))
+	r.Next(msgLen)
+	bytes := r.Next(payloadLen)
 
 	// Build a message
 	messageId := bytes[0]
 	data := bytes[1:]
 	switch messageId {
-	case chokeId:
-		return Choke()
-	case unchokeId:
-		return Unchoke()
-	case interestedId:
-		return Interested()
-	case uninterestedId:
-		return Uninterested()
-	case haveId:
-		index := Uint32(data)
-		return Have(index)
+	case chokeId: return Choke{}
+	case unchokeId: return Unchoke{}
+	case interestedId: return Interested{}
+	case uninterestedId: return Uninterested{}
+	case haveId: return Have(Int(data))
 	case bitfieldId:
-		return Bitfield(data)
+		bits := make([]byte, len(data))
+		copy(bits, data)
+		return Bitfield(bits)
 	case requestId:
-		index := Uint32(data[0:4])
-		begin := Uint32(data[4:8])
-		length := Uint32(data[8:12])
 		// TODO: If length is > 16Kb close connection?
-		return Request(index, begin, length)
+		return Request{Int(data[:4]), Int(data[4:8]), Int(data[8:12])}
 	case blockId:
-		index := Uint32(data[0:4])
-		begin := Uint32(data[4:8])
-		return Block(index, begin, data[8:])
-	case cancelId:
-		index := Uint32(data[0:4])
-		begin := Uint32(data[4:8])
-		length := Uint32(data[8:12])
-		return Cancel(index, begin, length)
+		block := make([]byte, len(data)-8)
+		copy(block, data[8:])
+		return Block{Int(data[:4]), Int(data[4:8]), block}
+	case cancelId: return Cancel{Int(data[:4]), Int(data[4:8]), Int(data[8:12])}
 	default:
-		// Unknown message
-		return &GenericMessage{msgLen, messageId, nil}
+		return nil // Unknown message - skip - TODO: should log this.
 	}
 }
 
-// Private function to read byte slice to uint32
-func Uint32(bytes []byte) uint32 {
-	return binary.BigEndian.Uint32(bytes)
+func Len(pm ProtocolMessage) int {
+	switch m := pm.(type) {
+	case KeepAlive: return keepAliveLength
+	case Choke: return chokeLength
+	case Unchoke: return unchokeLength
+	case Interested: return interestedLength
+	case Uninterested: return uninterestedLength
+	case Have: return haveLength
+	case Block: return 9 + len(m.block)
+	case Cancel: return cancelLength
+	case Request: return requestLength
+	case Bitfield: return 1 + len(m)
+	default:
+		panic(fmt.Sprintf("Unknown message: %v", pm))
+	}
 }
 
-// Private function to write uint32 into byte slice
-func PutUint32(b []byte, i uint32) {
-	binary.BigEndian.PutUint32(b, i)
+func Id(pm ProtocolMessage) byte {
+	switch m := pm.(type) {
+	case KeepAlive: return 0 // TODO: Special marker
+	case Choke: return chokeId
+	case Unchoke: return unchokeId
+	case Interested: return interestedId
+	case Uninterested: return uninterestedId
+	case Have: return haveId
+	case Block: return blockId
+	case Cancel: return cancelId
+	case Request: return requestId
+	case Bitfield: return bitfieldId
+	default:
+		panic(fmt.Sprintf("Unknown message: %v", m))
+	}
 }
 
 func ToString(pm ProtocolMessage) string {
-
 	switch m := pm.(type) {
-	case *KeepAliveMessage:
-		return "KeepAlive"
-	case *ChokeMessage:
-		return "Choke"
-	case *UnchokeMessage:
-		return "Unchoke"
-	case *InterestedMessage:
-		return "Interested"
-	case *UninterestedMessage:
-		return "Uninterested"
-	case *HaveMessage:
-		return fmt.Sprintf("Have [%v]", m.index)
-	case *BlockMessage:
-		return fmt.Sprintf("Block [index:%v, begin:%v, %x...]", m.index, m.begin, m.block[0:int(math.Min(10, float64(len(m.block))))])
-	case *CancelMessage:
-		return fmt.Sprintf("Cancel [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
-	case *RequestMessage:
-		return fmt.Sprintf("Request [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
-	case *BitfieldMessage:
-		return fmt.Sprintf("Bitfield [%x]", m.bits)
-	case *GenericMessage:
-		return fmt.Sprintf("Generic Message [Len: %v, Id: %v]", m.len, m.id)
-	default:
-		return fmt.Sprintf("Unknown Message: %v", m)
+	case KeepAlive: return "KeepAlive"
+	case Choke: return "Choke"
+	case Unchoke: return "Unchoke"
+	case Interested: return "Interested"
+	case Uninterested: return "Uninterested"
+	case Have: return fmt.Sprintf("Have [%v]", m)
+	case Block: return fmt.Sprintf("Block [index:%v, begin:%v, %x...]", m.index, m.begin, m.block[0:int(math.Min(10, float64(len(m.block))))])
+	case Cancel: return fmt.Sprintf("Cancel [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
+	case Request: return fmt.Sprintf("Request [index:%v, begin:%v, length:%v]", m.index, m.begin, m.length)
+	case Bitfield: return fmt.Sprintf("Bitfield [%x]", m)
+	default: return fmt.Sprintf("Unknown Message: %v", m)
 	}
 }
 
-func OnRequest(pm ProtocolMessage, f func(req *RequestMessage)) {
-	if req, ok := pm.(*RequestMessage); ok {
-		f(req)
+// Private function to read byte slice to int
+func Int(b []byte) int {
+	i := binary.BigEndian.Uint32(b)
+	if uint(i) > MaxInt {
+		panic("Cannot decode int")
 	}
+	return int(i)
+}
+
+// Private function to write int into byte slice
+func PutUint32(b []byte, i int) {
+	binary.BigEndian.PutUint32(b, uint32(i))
 }

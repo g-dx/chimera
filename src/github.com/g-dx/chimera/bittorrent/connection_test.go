@@ -21,7 +21,7 @@ func TestConnectionEstablish(t *testing.T) {
 	intEquals(t, 1, len(list.msgs))
 	msgEquals(t, msg1, list.msgs[0])
 
-	msg2 := Unchoke()
+	msg2 := Unchoke{}
 	pc2.Send(msg2)
 	list = pc1.Receive()
 	intEquals(t, 1, len(list.msgs))

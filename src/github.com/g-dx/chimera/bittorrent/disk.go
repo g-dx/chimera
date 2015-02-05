@@ -26,10 +26,10 @@ var empty = make([]DiskOp, 0)
 type DiskOp interface {
 }
 
-type WriteOp *BlockMessage
+type WriteOp Block
 type ReadOp struct {
 	id    *PeerIdentity
-	block *BlockMessage
+	block Block
 }
 // TODO: Implement Cancel
 
@@ -51,7 +51,7 @@ type HashFailed int
 
 type ReadOk struct {
 	id    *PeerIdentity
-	block *BlockMessage
+	block Block
 }
 
 
@@ -118,11 +118,11 @@ func (d * Disk) loop() {
 	}
 }
 
-func (d * Disk) Read(id *PeerIdentity, block *BlockMessage) {
+func (d * Disk) Read(id *PeerIdentity, block Block) {
 	d.in <- ReadOp{id, block}
 }
 
-func (d * Disk) Write( block *BlockMessage) {
+func (d * Disk) Write( block Block) {
 	d.in <- WriteOp(block)
 }
 
@@ -217,12 +217,12 @@ func (ci * CacheIO) WriteAt(p []byte, index, off int) error {
 		blocks := int(math.Ceil(float64(size) / float64(ci.blockSize)))
 
 		// Create new write buffer
-		wb = &WriteBuffer{make([]byte, size), NewBitSet(uint32(blocks))}
+		wb = &WriteBuffer{make([]byte, size), NewBitSet(blocks)}
 		ci.w[index] = wb
 	}
 
 	// Check if we need this block
-	block := uint32(off / ci.blockSize)
+	block := off / ci.blockSize
 	if !wb.Have(block) {
 
 		copy(wb.buf[off:off+len(p)], p)

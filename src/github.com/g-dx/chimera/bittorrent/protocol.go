@@ -60,11 +60,11 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 	ops := make(chan DiskOpResult)
 	layout := NewDiskLayout(files, mi.PieceLength, mi.TotalLength())
 	fileio := NewFileIO(layout, logger)
-	cacheio := NewCacheIO(layout, mi.Hashes, int(_16KB), ops, fileio)
+	cacheio := NewCacheIO(layout, mi.Hashes, _16KB, ops, fileio)
 	disk := NewDisk(cacheio, ops)
 
 	// Create piece map
-	pieceMap := NewPieceMap(uint32(len(mi.Hashes)), mi.PieceLength, mi.TotalLength())
+	pieceMap := NewPieceMap(len(mi.Hashes), int(mi.PieceLength), mi.TotalLength())
 
 	// Create coordinator
 	ph := &ProtocolHandler{
@@ -144,11 +144,11 @@ func (ph *ProtocolHandler) onDisk(op DiskOpResult) {
 		ph.logger.Printf("piece [%v] written to disk\n", r)
 
 		// Mark piece as complete
-		ph.pieceMap.Get(uint32(r)).Complete()
+		ph.pieceMap.Get(int(r)).Complete()
 
 		// Send haves
 		for _, p := range ph.peers {
-			p.Add(Have(uint32(r)))
+			p.Add(Have(r))
 		}
 
 		// Are we complete?
@@ -157,7 +157,7 @@ func (ph *ProtocolHandler) onDisk(op DiskOpResult) {
 		}
 	case HashFailed:
 		// Reset piece
-		ph.pieceMap.Get(uint32(r)).Reset()
+		ph.pieceMap.Get(int(r)).Reset()
 
 	case ErrorResult:
 		ph.logger.Panicf("Disk [%v] Failed: %v\n", r.op, r.err)
@@ -227,7 +227,6 @@ func (ph *ProtocolHandler) onPeerMessage(id *PeerIdentity, msg ProtocolMessage) 
 			ph.closePeer(p, err)
 		}
 	}
-	msg.Recycle()
 }
 
 func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {

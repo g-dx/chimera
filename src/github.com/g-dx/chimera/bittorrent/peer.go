@@ -59,7 +59,7 @@ func NewPeer(id *PeerIdentity,
 	return &Peer{
 		id:         id,
 		pieceMap:   pieceMap,
-		state:      NewPeerState(NewBitSet(uint32(len(pieceMap.pieces)))),
+		state:      NewPeerState(NewBitSet(len(pieceMap.pieces))),
 		logger:     logger,
 		statistics: NewStatistics(),
 		queue:      queue,
@@ -72,24 +72,24 @@ func (p *Peer) Id() *PeerIdentity {
 
 func (p *Peer) OnMessage(pm ProtocolMessage) error {
 	switch msg := pm.(type) {
-	case *ChokeMessage:
+	case Choke:
 		return p.onChoke()
-	case *UnchokeMessage:
+	case Unchoke:
 		return p.onUnchoke()
-	case *InterestedMessage:
+	case Interested:
 		return p.onInterested()
-	case *UninterestedMessage:
+	case Uninterested:
 		return p.onUninterested()
-	case *BitfieldMessage:
-		return p.onBitfield(msg.Bits())
-	case *HaveMessage:
-		return p.onHave(msg.Index())
-	case *CancelMessage:
-		return p.onCancel(msg.Index(), msg.Begin(), msg.Length())
-	case *RequestMessage:
-		return p.onRequest(msg.Index(), msg.Begin(), msg.Length())
-	case *BlockMessage:
-		return p.onBlock(msg.Index(), msg.Begin(), msg.Block())
+	case Bitfield:
+		return p.onBitfield(msg)
+	case Have:
+		return p.onHave(int(msg))
+	case Cancel:
+		return p.onCancel(msg.index, msg.begin, msg.length)
+	case Request:
+		return p.onRequest(msg.index, msg.begin, msg.length)
+	case Block:
+		return p.onBlock(msg.index, msg.begin, msg.block)
 	default:
 		return newError(fmt.Sprintf("Unknown protocol message: %v", pm))
 	}
@@ -116,7 +116,7 @@ func (p *Peer) onUninterested() error {
 	return nil
 }
 
-func (p *Peer) onHave(index uint32) error {
+func (p *Peer) onHave(index int) error {
 
 	// Validate
 	if !p.state.bitfield.IsValid(index) {
@@ -132,18 +132,18 @@ func (p *Peer) onHave(index uint32) error {
 
 		if p.isNowInteresting(index) {
 			p.state.localInterest = true
-			p.queue.Add(Interested())
+			p.queue.Add(Interested{})
 		}
 	}
 	return nil
 }
 
-func (p *Peer) onCancel(index, begin, length uint32) error {
+func (p *Peer) onCancel(index, begin, length int) error {
 	// TODO: Implement cancel support
 	return nil
 }
 
-func (p *Peer) onRequest(index, begin, length uint32) error {
+func (p *Peer) onRequest(index, begin, length int) error {
 
 	// TODO: Check request valid
 	//	p.pieceMap.IsValid()
@@ -153,7 +153,7 @@ func (p *Peer) onRequest(index, begin, length uint32) error {
 	return nil
 }
 
-func (p *Peer) onBlock(index, begin uint32, block []byte) error {
+func (p *Peer) onBlock(index, begin int, block []byte) error {
 	// NOTE: Already on the way to disk...
 	// p.disk.Write(index, begin, length, p.id)
 //	p.disk.Write(index, begin, block)
@@ -174,10 +174,10 @@ func (p *Peer) onBitfield(bits []byte) error {
 	p.pieceMap.IncAll(p.state.bitfield)
 
 	// Check if we are interested
-	for i := uint32(0); i < p.state.bitfield.Size(); i++ {
+	for i := 0; i < p.state.bitfield.Size(); i++ {
 		if p.pieceMap.Piece(i).RequestsRequired() {
 			p.state.localInterest = true
-			p.queue.Add(Interested())
+			p.queue.Add(Interested{})
 			break
 		}
 	}
@@ -188,7 +188,7 @@ func (p Peer) Stats() *Statistics {
 	return p.statistics
 }
 
-func (p *Peer) isNowInteresting(index uint32) bool {
+func (p *Peer) isNowInteresting(index int) bool {
 	return !p.state.localInterest && p.pieceMap.Piece(index).RequestsRequired()
 }
 
@@ -213,14 +213,14 @@ func (p *Peer) CanDownload() bool {
 
 func (p *Peer) Choke() error {
 	p.state.remoteChoke = true
-	return p.Add(Choke())
+	return p.Add(Choke{})
 }
 
 func (p *Peer) UnChoke(optimistic bool) error {
 	p.state.optimistic = optimistic
 	p.state.new = false
 	p.state.remoteChoke = false
-	return p.Add(Unchoke())
+	return p.Add(Unchoke{})
 }
 
 func (p *Peer) IsInterested() bool {
@@ -243,26 +243,13 @@ func (p *Peer) IsNew() bool {
 	return p.state.new
 }
 
-func (p *Peer) Cancel(index, begin, len uint32) error {
-	return p.Add(Cancel(index, begin, len))
+func (p *Peer) Cancel(index, begin, len int) error {
+	return p.Add(Cancel{index, begin, len})
 }
 
 func (p *Peer) Add(pm ProtocolMessage) error {
 	p.queue.Add(pm)
 	return nil // TODO: Fix this!
-}
-
-// ----------------------------------------------------------------------------------
-// Disk Callbacks
-// ----------------------------------------------------------------------------------
-
-func (p *Peer) onBlockRead(index, begin int, block []byte) {
-	p.Stats().Upload.Add(len(block))
-	p.Add(Block(uint32(index), uint32(begin), block))
-}
-
-func (p *Peer) onBlockWritten(index, begin, len int) {
-	p.Stats().Written.Add(len)
 }
 
 // ----------------------------------------------------------------------------------

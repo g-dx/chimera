@@ -94,7 +94,7 @@ func PickPieces2(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolReques
 
 	taken := make(set)    // The blocks which have already been taken
 	complete := make(set) // The pieces whose block have are all requested or taken
-	picked := make(map[*Peer][]*RequestMessage) // The blocks picked for each peer
+	picked := make(map[*Peer][]Request) // The blocks picked for each peer
 
 	for _, peer := range peers {
 		if peer.CanDownload() {
@@ -102,7 +102,7 @@ func PickPieces2(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolReques
 			// Find total required
 			n := peer.QueuedRequests() + requestTimer.BlocksWaiting(*peer.Id())
 
-			reqs := make([]*RequestMessage, 0, n)
+			reqs := make([]Request, 0, n)
 			for _, p := range availablePieces(complete, pieceMap, peer, n) {
 
 				// Pick all the pieces we can
@@ -152,16 +152,16 @@ func availablePieces(complete set, pieceMap *PieceMap, peer *Peer, n int) []*Pie
 }
 
 
-func pick(taken set, p *Piece, wanted int) ([]*RequestMessage, bool) {
+func pick(taken set, p *Piece, wanted int) ([]Request, bool) {
 
-	reqs := make([]*RequestMessage, 0, wanted)
+	reqs := make([]Request, 0, wanted)
 	for i, s := range p.blocks {
 
 		// If not already taken & needed
 		if !taken.Has(toOffset(p, i)) && s == NEEDED {
 
 			// Add request & check if we are done
-			reqs = append(reqs, Request(p.index, uint32(i)*_16KB, p.BlockLen(i)))
+			reqs = append(reqs, Request{p.index, i*_16KB, p.BlockLen(i)})
 			if len(reqs) == wanted {
 				return reqs, false
 			}

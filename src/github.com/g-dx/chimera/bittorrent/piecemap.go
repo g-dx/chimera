@@ -1,23 +1,23 @@
 package bittorrent
 
 const (
-	_16KB  = uint32(16 * 1024)
-	_128KB = uint32(128 * 1024)
+	_16KB  = int(16 * 1024)
+	_128KB = int(128 * 1024)
 )
 
 type PieceMap struct {
 	pieces []*Piece
 }
 
-func NewPieceMap(n, pieceLen uint32, len uint64) *PieceMap {
+func NewPieceMap(n, pieceLen int, len uint64) *PieceMap {
 
 	pieces := make([]*Piece, n)
-	for i := uint32(0); i < n-1; i++ {
+	for i := 0; i < n-1; i++ {
 		pieces[i] = NewPiece(i, pieceLen)
 	}
 
 	// Build last piece
-	lastPieceLen := uint32(len % uint64(pieceLen))
+	lastPieceLen := int(len % uint64(pieceLen))
 	if lastPieceLen == 0 {
 		lastPieceLen = pieceLen
 	}
@@ -34,37 +34,37 @@ func (pm PieceMap) IsComplete() bool {
 	return true
 }
 
-func (pm PieceMap) Get(i uint32) *Piece {
+func (pm PieceMap) Get(i int) *Piece {
 	return pm.pieces[i]
 }
 
-func (pm *PieceMap) Inc(i uint32) {
+func (pm *PieceMap) Inc(i int) {
 	pm.pieces[i].availability++
 }
 
 func (pm *PieceMap) IncAll(bits *BitSet) {
-	for i := uint32(0); i < bits.Size(); i++ {
+	for i := 0; i < bits.Size(); i++ {
 		if bits.Have(i) {
 			pm.Inc(i)
 		}
 	}
 }
 
-func (pm *PieceMap) Dec(i uint32) {
+func (pm *PieceMap) Dec(i int) {
 	pm.pieces[i].availability--
 }
 
 func (pm *PieceMap) DecAll(bits *BitSet) {
-	for i := uint32(0); i < bits.Size(); i++ {
+	for i := 0; i < bits.Size(); i++ {
 		if bits.Have(i) {
 			pm.Dec(i)
 		}
 	}
 }
 
-func (pm *PieceMap) IsValid(index, begin, length uint32) bool {
+func (pm *PieceMap) IsValid(index, begin, length int) bool {
 	// 1. index valid
-	if index >= uint32(len(pm.pieces)) {
+	if index >= len(pm.pieces) {
 		return false
 	}
 
@@ -78,22 +78,21 @@ func (pm *PieceMap) IsValid(index, begin, length uint32) bool {
 	return length < _128KB
 }
 
-func (pm *PieceMap) Piece(i uint32) *Piece {
+func (pm *PieceMap) Piece(i int) *Piece {
 	return pm.pieces[i]
 }
 
-func (p *PieceMap) ReturnBlocks(reqs []*RequestMessage) {
+func (p *PieceMap) ReturnBlocks(reqs []Request) {
 	for _, req := range reqs {
 		// Reset block state to needed and ensure overall piece state is blocks needed
-		p.pieces[req.Index()].ReturnBlock(req)
-		req.Recycle()
+		p.pieces[req.index].ReturnBlock(req)
 	}
 }
 
 func (p *PieceMap) ReturnBlock(index, begin int) {
 	// TODO: Check index & begin valid!
 	pi := p.pieces[index]
-	pi.blocks[uint32(begin)/_16KB] = NEEDED
+	pi.blocks[begin/_16KB] = NEEDED
 
 	// Ensure we set overall piece state
 	pi.state = NOT_STARTED
@@ -120,15 +119,15 @@ const (
 )
 
 type Piece struct {
-	index        uint32
-	len          uint32
+	index        int
+	len          int
 	blocks       []uint8
-	lastBlockLen uint32
-	availability uint32
+	lastBlockLen int
+	availability int
 	state        int
 }
 
-func NewPiece(i, len uint32) *Piece {
+func NewPiece(i, len int) *Piece {
 
 	// Calculate number of blocks & size of last block
 	n := len / _16KB
@@ -147,7 +146,7 @@ func NewPiece(i, len uint32) *Piece {
 	return &Piece{i, len, blocks, lastBlockLen, 0, NOT_STARTED}
 }
 
-func (p *Piece) BlockLen(block int) uint32 {
+func (p *Piece) BlockLen(block int) int {
 	length := _16KB
 	if block == len(p.blocks)-1 {
 		length = p.lastBlockLen
@@ -187,13 +186,13 @@ func (p Piece) Reset() {
 	p.state = NOT_STARTED
 }
 
-func (p Piece) Length() uint32 {
+func (p Piece) Length() int {
 	return p.len
 }
 
-func (p *Piece) TakeBlocks(n int) []*RequestMessage {
+func (p *Piece) TakeBlocks(n int) []Request {
 
-	reqs := make([]*RequestMessage, 0, 5)
+	reqs := make([]Request, 0, 5)
 	state := FULLY_REQUESTED
 	for i, s := range p.blocks {
 
@@ -206,7 +205,7 @@ func (p *Piece) TakeBlocks(n int) []*RequestMessage {
 			if i == len(p.blocks)-1 {
 				length = p.lastBlockLen
 			}
-			reqs = append(reqs, Request(p.index, uint32(i)*_16KB, length))
+			reqs = append(reqs, Request{p.index, i*_16KB, length})
 		}
 
 		// Keep track of the overall piece a
@@ -220,8 +219,8 @@ func (p *Piece) TakeBlocks(n int) []*RequestMessage {
 	return reqs
 }
 
-func (p *Piece) ReturnBlock(req *RequestMessage) {
-	p.blocks[req.Begin()/_16KB] = NEEDED
+func (p *Piece) ReturnBlock(req Request) {
+	p.blocks[req.begin/_16KB] = NEEDED
 
 	// Ensure we set
 	p.state = NOT_STARTED
