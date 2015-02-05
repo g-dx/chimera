@@ -1,0 +1,88 @@
+Refactor:
+=========
+
++ Messages
+----------
+
+Strip methods from messages. This allows them to become simple.
+
+type ProtocolMessage interface {}
+type Choke struct{}
+...
+type Have int
+type Request struct { index, begin, length }
+.. etc
+
+func messageLength(pm ProtocolMessage) int {
+
+}
+
+func messageId(pm ProtocolMessage) int {
+
+}
+
+This means we can drop sync.Pools for these types.
+
++ PeerWireState
+---------------
+
+Capture key protocol state in int
+
+type PeerWireState byte
+
+func (pws PeerWireState) choked() PeerWireState {
+    return pws << 1
+}
+
++ Pure
+------
+
+- Picker should be made side-effect free
+- Choker should be made side-effect free
+- Message handling probably can't be side-effect free without lots of work
+
++ PeerState
+-----------
+
+type PeerState struct {
+    wire WireState
+    pending set[Block]
+    downloaded counter
+    uploaded counter
+}
+
+type BlockOffset uint64
+func toOffset(index, begin int) BlockOffset {
+    return uint64(index) * pieceSize + uint64(begin)
+    // do bitshifting?
+}
+
++ MessageHandler
+---------------
+
+onMessage(pm ProtocolMessage, p Peer, mp PieceMap, net chan<-ProtocolMessage, disk chan<- DiskMessage) (Peer)
+
++ Queue
+-------
+
+- These need a channel to send blocks back to protocol on choke
+
++ Connection & Decode
+---------------------
+
+Can all be drastically simplified. Unmarshall should perform the looping and decode as many messages as possible. It
+then returns a []ProtocolMessage. This also prevents copy-by-value for the new message types.
+
+The incoming connection code then becomes a lots simpler (we can remove both methods).
+
+Peer will need to be updated to skip KeepAlive messages.
+
++ Peer
+------
+
+Again adopt the batching technique. Pass the entire message list to Peer.onMessage(...) so that we don't copy-by-value
+for Cancel, Request, etc... The signature of the new method should probably be:
+
+func OnMessages(pm []ProtocolMessage, mp PieceMap, s *Statistics) (error, []DiskOp, []ProtocolMessage, WireState) {}
+
+Maybe...?
