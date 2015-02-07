@@ -331,12 +331,15 @@ func (tp *TestPeer) uninterested() *TestPeer {
 	return tp
 }
 
-// TODO: fix me!
 func (tp *TestPeer) with(msgs ...ProtocolMessage) *TestPeer {
-//	err, _, _ := OnMessages(msgs, *Peer(tp))
-//	if err != nil {
-//		panic(err)
-//	}
+	err, net, _ := OnMessages(msgs, tp.Peer)
+	if err != nil {
+		panic(err)
+	}
+	// Send messages
+	for _, msg := range net {
+		tp.Add(msg)
+	}
 	return tp
 }
 

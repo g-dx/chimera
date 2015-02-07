@@ -83,7 +83,7 @@ func TakeBlocks(pieces []*Piece, numRequired int, p *Peer) {
 	}
 }
 
-func PickPieces2(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequestTimer) bool {
+func PickPieces2(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequestTimer) map[*Peer][]Request {
 
 	// Sort into fastest downloaders
 	sortedPeers := make([]*Peer, len(peers))
@@ -127,7 +127,7 @@ func PickPieces2(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolReques
 		}
 	}
 
-	return false
+	return picked
 }
 
 func availablePieces(complete set, pieceMap *PieceMap, peer *Peer, n int) []*Piece {

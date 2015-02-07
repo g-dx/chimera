@@ -3,7 +3,7 @@ package bittorrent
 import "testing"
 
 // TODO: fix me!
-func PickPiecesFixMe(t *testing.T) {
+func TestPickPieces(t *testing.T) {
 
 	// Build a piecemap (nopieces=3, noblocks=10)
 	pm := NewPieceMap(3, 10*_16KB, uint64(30*_16KB))
@@ -84,6 +84,24 @@ func PickPiecesFixMe(t *testing.T) {
 			Request{2, 9*_16KB, _16KB},
 		)},
 	}
+
+//	t.Logf("%v", picked)
+//
+//	for p, msgs := range picked {
+//		data := testdata[0]
+//			if data.peer.Id().Equals(p.Id()) {
+//				for _, msg := range data.list.msgs {
+//					for _, msg2 := range msgs {
+//						actual := ToString(msg)
+//						expected := ToString(msg2)
+//						if actual != expected {
+//							t.Errorf("\nPeer: %v\nExpected: %v\nActual  : %v",
+//								p.Id(), expected, actual)
+//						}
+//					}
+//				}
+//			}
+//	}
 
 	// Check outgoing message of all peers
 	for _, tt := range testdata {
