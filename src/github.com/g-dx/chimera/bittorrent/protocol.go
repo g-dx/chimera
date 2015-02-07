@@ -111,8 +111,21 @@ func (ph *ProtocolHandler) loop() {
 			ph.onTrackerResponse(r)
 
 		case list := <-ph.peerMsgs:
-			for _, msg := range list.msgs {
-				ph.onPeerMessage(list.id, msg)
+			p := ph.findPeer(list.id)
+			if p != nil {
+				// Process all messages
+				err, net, disk := OnMessages(list.msgs, p)
+				if err != nil {
+					ph.closePeer(p, err)
+				}
+				// Send to net
+				for msg := range net {
+					p.queue.Add(msg)
+				}
+				// Send to disk
+				for msg := range disk {
+					ph.disk.in <- msg
+				}
 			}
 
 		case e := <-ph.peerErrors:
@@ -218,17 +231,6 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 	ph.newPeers <- NewPeer(id, NewQueue(out, f), ph.pieceMap, ph.logger)
 }
 
-func (ph *ProtocolHandler) onPeerMessage(id *PeerIdentity, msg ProtocolMessage) {
-
-	p := ph.findPeer(id)
-	if p != nil {
-		err := p.OnMessage(msg)
-		if err != nil {
-			ph.closePeer(p, err)
-		}
-	}
-}
-
 func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
 
 	// TODO:
@@ -250,7 +252,23 @@ func (ph *ProtocolHandler) onTick(n int) {
 
 	// Run choking algorithm
 	if n%chokeInterval == 0 {
-		ChokePeers(ph.isSeed, ph.peers, n%optimisticChokeInterval == 0)
+		old, new, chokes, unchokes := ChokePeers(ph.isSeed, ph.peers, n%optimisticChokeInterval == 0)
+		// Clear optimistic
+		if old != nil {
+			old.state.ws = old.state.ws.NotOptimistic()
+		}
+		// Set optimistic
+		if new != nil {
+			new.state.ws = new.state.ws.Optimistic()
+		}
+		// Send chokes
+		for _, p := range chokes {
+			p.Add(Choke{})
+		}
+		// Send unchokes
+		for _, p := range unchokes {
+			p.Add(Unchoke{})
+		}
 	}
 
 	// Run piece picking algorithm

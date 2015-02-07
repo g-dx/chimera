@@ -1,23 +1,10 @@
 TODO:
 =========
 
-+ PeerWireState
-===============
-Capture key protocol state in int
-
-type PeerWireState byte
-
-func (pws PeerWireState) choked() PeerWireState {
-    return pws << 1
-}
-
-etc
-
 + Pure
 ------
 
 - Picker should be made side-effect free
-- Choker should be made side-effect free
 - Message handling probably can't be side-effect free without lots of work
 
 + PeerState
@@ -57,7 +44,7 @@ less than half full halve the buffer size.
 
 Incoming not too sure....
 
-+ Simpifly PeerIdentity
++ Simplify PeerIdentity
 =======================
 Currently this is a pointer to a struct. Really we want an opaque value. We can change this to be:
 
@@ -65,3 +52,7 @@ type PeerIdentity string
 
 Which is immutable and can be passed around by value as a string is a glorified slice.
 TODO: We need to check if this does indeed result only copying a pointer?
+
++ Update peer storage to use map
+================================
+The protocol class should use a map to quickly find a peer for a given id.

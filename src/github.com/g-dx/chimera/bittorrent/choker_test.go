@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 	"os"
+	"runtime"
 )
 
 func BenchmarkChokePeers10(b *testing.B) {
@@ -66,8 +67,9 @@ func TestBuildCandidatesGivenNewPeers(t *testing.T) {
 
 func TestChokePeersGivenNoPeers(t *testing.T) {
 	peers := asList()
-	ChokePeers(false, peers, false)
-	intEquals(t, 0, len(peers))
+	_, _, chokes, unchokes := ChokePeers(false, peers, false)
+	containsPeers(t, unchokes)
+	containsPeers(t, chokes)
 }
 
 func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T) {
@@ -82,11 +84,13 @@ func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T
 	p2.UnChoke(false)
 
 	// Run choker & check optimistic has *not* changed
-	ChokePeers(false, peers, true)
-	assertUnchoked(t, p1)
-	assertChoked(t, p2)
-	boolEquals(t, true, p1.IsOptimistic())
-	boolEquals(t, false, p2.IsOptimistic())
+	old, new, chokes, unchokes := ChokePeers(false, peers, true)
+
+	containsPeers(t, unchokes) // p1 already unchoked
+	containsPeers(t, chokes, p2)
+	if !old.Id().Equals(new.Id()) {
+		t.Errorf("Expected: %v, Actual: %v", old.Id(), new.Id())
+	}
 }
 
 func TestChokePeersGivenNoOptimisticCandidatesAndNoOptimistic(t *testing.T) {
@@ -101,10 +105,15 @@ func TestChokePeersGivenNoOptimisticCandidatesAndNoOptimistic(t *testing.T) {
 	p2.UnChoke(false)
 
 	// Run choker & check no optimistic
-	ChokePeers(false, peers, true)
-	assertChoked(t, p1, p2)
-	boolEquals(t, false, p1.IsOptimistic())
-	boolEquals(t, false, p2.IsOptimistic())
+	old, new, chokes, unchokes := ChokePeers(false, peers, true)
+	containsPeers(t, chokes, p1, p2)
+	containsPeers(t, unchokes)
+	if old != nil {
+		t.Errorf("Expected: nil, Actual: %v", old.Id())
+	}
+	if new != nil {
+		t.Errorf("Expected: nil, Actual: %v", new.Id())
+	}
 }
 
 func TestChokePeersGivenNoInterestedPeers(t *testing.T) {
@@ -115,9 +124,10 @@ func TestChokePeersGivenNoInterestedPeers(t *testing.T) {
 	peers := asList(p1, p2, p3)
 	defer teardown(peers)
 
-	// Run choker
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1, p2, p3)
+	// Run choker & check all still choked
+	_, _, chokes, unchokes := ChokePeers(false, peers, false)
+	containsPeers(t, chokes) // p1, p2, p3 already choked
+	containsPeers(t, unchokes)
 }
 
 func TestChokePeersGivenSameSpeedPeersWhenInterestChanges(t *testing.T) {
@@ -129,23 +139,25 @@ func TestChokePeersGivenSameSpeedPeersWhenInterestChanges(t *testing.T) {
 	defer teardown(peers)
 
 	// Run choker
-	ChokePeers(false, peers, false)
-	assertChoked(t, p2, p3)
-	assertUnchoked(t, p1)
+	_, _, chokes, unchokes := ChokePeers(false, peers, false)
+	containsPeers(t, chokes) // p2 & p3 already choked
+	containsPeers(t, unchokes, p1)
+	applyChokesAndUnchokes(chokes, unchokes)
 
 	// Alter interest and run choker
 	p1.uninterested()
 	p3.interested()
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1, p2)
-	assertUnchoked(t, p3)
+	_, _, chokes, unchokes = ChokePeers(false, peers, false)
+	containsPeers(t, chokes, p1) // p2 already choked
+	containsPeers(t, unchokes, p3)
+	applyChokesAndUnchokes(chokes, unchokes)
 
 	// Alter interest and run choker
 	p2.interested()
 	p3.uninterested()
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1, p3)
-	assertUnchoked(t, p2)
+	_, _, chokes, unchokes = ChokePeers(false, peers, false)
+	containsPeers(t, chokes, p3) // p1 already choked
+	containsPeers(t, unchokes, p2)
 }
 
 func TestChokePeersGivenDifferentSpeedsWhenInterestChanges(t *testing.T) {
@@ -162,26 +174,30 @@ func TestChokePeersGivenDifferentSpeedsWhenInterestChanges(t *testing.T) {
 	defer teardown(peers)
 
 	// Run choker
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1)
-	assertUnchoked(t, p2, p3, p4, p5, p6, p7, p8)
+	_, _, chokes, unchokes := ChokePeers(false, peers, false)
+	containsPeers(t, chokes) // p1 already choked
+	containsPeers(t, unchokes, p2, p3, p4, p5, p6, p7, p8)
+	applyChokesAndUnchokes(chokes, unchokes)
 
 	// Alter interest & run choker
 	p2.uninterested()
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1, p2, p3)
-	assertUnchoked(t, p4, p5, p6, p7, p8)
+	_, _, chokes, unchokes = ChokePeers(false, peers, false)
+	containsPeers(t, chokes, p2, p3) // p1 already choked
+	containsPeers(t, unchokes) // p4, p5, p6, p7, p8 already unchoked
+	applyChokesAndUnchokes(chokes, unchokes)
 
 	// Alter interest & run choker
 	p4.uninterested()
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1, p2, p3, p4, p5, p6)
-	assertUnchoked(t, p7, p8)
+	_, _, chokes, unchokes = ChokePeers(false, peers, false)
+	containsPeers(t, chokes, p4, p5, p6) // p1, p2, p3 already choked
+	containsPeers(t, unchokes) // p7, p8 already unchoked
+	applyChokesAndUnchokes(chokes, unchokes)
 
 	// Alter interest & run choker
 	p7.uninterested()
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1, p2, p3, p4, p5, p6, p7, p8)
+	_, _, chokes, unchokes = ChokePeers(false, peers, false)
+	containsPeers(t, chokes, p7, p8)
+	containsPeers(t, unchokes)
 }
 
 func TestChokePeersGivenDifferentSpeedsWhenSpeedChanges(t *testing.T) {
@@ -197,17 +213,69 @@ func TestChokePeersGivenDifferentSpeedsWhenSpeedChanges(t *testing.T) {
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8)
 	defer teardown(peers)
 
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1, p2, p3, p4)
-	assertUnchoked(t, p5, p6, p7, p8)
+	_, _, chokes, unchokes := ChokePeers(false, peers, false)
+	containsPeers(t, chokes) // p1, p2, p3, p4 already choked
+	containsPeers(t, unchokes, p5, p6, p7, p8)
+	applyChokesAndUnchokes(chokes, unchokes)
 
 	// Alter speed & run choker
 	p5.dl(9)
 	p6.dl(10)
 	p7.dl(11)
-	ChokePeers(false, peers, false)
-	assertChoked(t, p1, p2, p3, p4, p8)
-	assertUnchoked(t, p5, p6, p7)
+	_, _, chokes, unchokes = ChokePeers(false, peers, false)
+	containsPeers(t, chokes, p8) // p1, p2, p3, p4 already choked
+	containsPeers(t, unchokes) // p5, p6, p7 already unchoked
+}
+
+func toList(ps []*Peer) string {
+	var s string
+	for _, p := range ps {
+		s += p.Id().String()
+		s += ", "
+	}
+	return s
+}
+
+func applyChokesAndUnchokes(chokes, unchokes []*Peer) {
+	for _, p := range chokes {
+		p.Choke()
+	}
+	for _, p := range unchokes {
+		p.UnChoke(false) // TODO: is this correct?
+	}
+}
+
+func containsPeers(t *testing.T, expected []*Peer, actual ...*TestPeer)  {
+
+	// Check all actual present in expected
+	for _, p1 := range actual {
+		var found bool
+		for _, p2 := range expected {
+			if p1.Peer.Id().Equals(p2.Id()) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			_, _, line, _ := runtime.Caller(1)
+			t.Errorf("Line: %v, Expected: %v - Not Found", line, p1.Peer.Id())
+		}
+	}
+
+	// Check all expected present in actual
+	for _, p1 := range expected {
+		var found bool
+		for _, p2 := range actual {
+			if p1.Id().Equals(p2.Peer.Id()) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			_, _, line, _ := runtime.Caller(1)
+			t.Errorf("Line: %v, Expected: %v - Not Found", line, p1.Id())
+		}
+	}
 }
 
 func assertChoked(t *testing.T, peers ...*TestPeer) {
@@ -234,55 +302,53 @@ type TestPeer struct {
 }
 
 func (tp *TestPeer) notChoking() *TestPeer {
-	tp.state.localChoke = false
+	tp.state.ws = tp.state.ws.NotChoking()
 	return tp
 }
 
 func (tp *TestPeer) choking() *TestPeer {
-	tp.state.localChoke = true
+	tp.state.ws = tp.state.ws.Choking()
 	return tp
 }
 
 func (tp *TestPeer) interesting() *TestPeer {
-	tp.state.localInterest = true
+	tp.state.ws = tp.state.ws.Interesting()
 	return tp
 }
 
 func (tp *TestPeer) notInteresting() *TestPeer {
-	tp.state.localInterest = true
+	tp.state.ws = tp.state.ws.NotInteresting()
 	return tp
 }
 
 func (tp *TestPeer) interested() *TestPeer {
-	tp.state.remoteInterest = true
-	tp.state.new = false
+	tp.state.ws = tp.state.ws.Interested().NotNew()
 	return tp
 }
 
 func (tp *TestPeer) uninterested() *TestPeer {
-	tp.state.remoteInterest = false
+	tp.state.ws = tp.state.ws.NotInterested()
 	return tp
 }
 
+// TODO: fix me!
 func (tp *TestPeer) with(msgs ...ProtocolMessage) *TestPeer {
-	for _, msg := range msgs {
-		err := tp.OnMessage(msg)
-		if err != nil {
-			panic(err)
-		}
-	}
+//	err, _, _ := OnMessages(msgs, *Peer(tp))
+//	if err != nil {
+//		panic(err)
+//	}
 	return tp
 }
 
 func (tp *TestPeer) dl(rate int) *TestPeer {
 	tp.Stats().Download.rate = rate
-	tp.state.new = false
+	tp.state.ws = tp.state.ws.NotNew()
 	return tp
 }
 
 func (tp *TestPeer) ul(rate int) *TestPeer {
 	tp.Stats().Upload.rate = rate
-	tp.state.new = false
+	tp.state.ws = tp.state.ws.NotNew()
 	return tp
 }
 

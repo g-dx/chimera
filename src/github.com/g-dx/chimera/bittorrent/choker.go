@@ -48,16 +48,22 @@ func (b ByTransferSpeed) Less(i, j int) bool {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) {
+func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) (*Peer, *Peer, []*Peer, []*Peer) {
+
+	// State to return
+	var old, new *Peer
+	var chokes, unchokes []*Peer
+
+	// Sanity check
 	if len(peers) == 0 {
-		return
+		return old, new, chokes, unchokes
 	}
 
-	// Attempt to set a new optimistic peer. If it's interested it counts as a downloader
+	// Attempt to calculate a new optimistic peer. If it's interested it counts as a downloader
 	n := 0
 	if changeOptimistic {
-		p := maybeChangeOptimistic(peers)
-		if p != nil && p.IsInterested() {
+		old, new = chooseOptimistic(peers)
+		if new != nil && new.IsInterested() {
 			n++
 		}
 	}
@@ -67,7 +73,7 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) {
 	sort.Sort(ByTransferSpeed{peers, isSeed})
 	pos := -1
 	for i, p := range peers {
-		if p.IsOptimistic() {
+		if p == new {
 			continue
 		}
 		if p.IsInterested() {
@@ -82,29 +88,28 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) {
 	// Iterate over peers and perform chokes & unchokes based on the position of the slowest
 	// peer to unchoke. Take care to not change the optimistic unchoke.
 	for i, p := range peers {
-		if p.IsOptimistic() {
+		if p == new {
 			continue
 		}
-		if i <= pos && p.IsChoked() {
-			p.UnChoke(false)
+		if i <= pos && p.IsChoking() {
+			unchokes = append(unchokes, p)
 		}
-		if i > pos && !p.IsChoked() {
-			p.Choke()
+		if i > pos && !p.IsChoking() {
+			chokes = append(chokes, p)
 		}
 	}
+	return old, new, chokes, unchokes
 }
 
-func maybeChangeOptimistic(peers []*Peer) *Peer {
+func chooseOptimistic(peers []*Peer) (*Peer, *Peer) {
 
-	c, cur := buildCandidates(peers)
-	if len(c) > 0 {
-		if cur != nil {
-			cur.ClearOptimistic()
-		}
-		cur := c[random.Intn(len(c))]
-		cur.UnChoke(true)
+	var new *Peer
+	can, old := buildCandidates(peers)
+	new = old
+	if len(can) > 0 {
+		new = can[random.Intn(len(can))]
 	}
-	return cur
+	return old, new
 }
 
 // Create the list of candidate optimistic unchoke peers. Also return
@@ -118,7 +123,7 @@ func buildCandidates(peers []*Peer) ([]*Peer, *Peer) {
 		}
 
 		// Newly connected peers 3x more likely to start
-		if p.IsChoked() {
+		if p.IsChoking() {
 			c = append(c, p)
 			if p.IsNew() {
 				c = append(c, p, p)
