@@ -22,6 +22,10 @@ const initWireState = 0x15
 
 type WireState byte
 
+func (ws WireState) CanDownload() bool {
+	return !ws.Choked() && ws.Interesting()
+}
+
 func (ws WireState) IsOptimistic() bool {
 	return testBit(ws, optimisticPos)
 }

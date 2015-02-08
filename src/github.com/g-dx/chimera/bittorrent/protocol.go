@@ -114,17 +114,22 @@ func (ph *ProtocolHandler) loop() {
 			p := ph.findPeer(list.id)
 			if p != nil {
 				// Process all messages
-				err, net, disk := OnMessages(list.msgs, p)
+				err, net, disk, blocks := OnMessages(list.msgs, p)
 				if err != nil {
 					ph.closePeer(p, err)
+					continue
 				}
 				// Send to net
-				for msg := range net {
+				for _, msg := range net {
 					p.queue.Add(msg)
 				}
 				// Send to disk
-				for msg := range disk {
+				for _, msg := range disk {
 					ph.disk.in <- msg
+				}
+				// Return blocks to piecemap
+				for _, _ = range blocks {
+//					ph.pieceMap.ReturnBlock() // TODO: Calculate index & begin
 				}
 			}
 
@@ -253,11 +258,11 @@ func (ph *ProtocolHandler) onTick(n int) {
 	// Run choking algorithm
 	if n%chokeInterval == 0 {
 		old, new, chokes, unchokes := ChokePeers(ph.isSeed, ph.peers, n%optimisticChokeInterval == 0)
-		// Clear optimistic
+		// Clear old optimistic
 		if old != nil {
 			old.state.ws = old.state.ws.NotOptimistic()
 		}
-		// Set optimistic
+		// Set new optimistic
 		if new != nil {
 			new.state.ws = new.state.ws.Optimistic()
 		}
@@ -273,6 +278,16 @@ func (ph *ProtocolHandler) onTick(n int) {
 
 	// Run piece picking algorithm
 	PickPieces(ph.peers, ph.pieceMap, ph.requestTimer)
+//	pp := PickPieces(ph.peers, ph.pieceMap, ph.requestTimer)
+//	for id, blocks := range pp {
+//		p := ph.findPeer(id)
+//		for _, msg := range blocks {
+//			// Send, mark as requested & add to pending map
+//			p.Add(msg)
+//			ph.pieceMap.Requested(msg.index, msg.begin)
+//			// TODO: Add to peer pending set
+//		}
+//	}
 }
 
 

@@ -32,6 +32,14 @@ func TestPickPieces(t *testing.T) {
 
 	PickPieces(peers, pm, pt)
 
+	/**
+	  Note: Can use the following pattern:
+
+	  data := map[PeerIdentity]MessageList{
+	   // ... data here ....
+	  }
+	 */
+
 	// Build expected output
 	var testdata = []struct {
 		peer *TestPeer

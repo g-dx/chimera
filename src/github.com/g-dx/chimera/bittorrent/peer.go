@@ -2,13 +2,6 @@ package bittorrent
 
 import (
 	"log"
-	"time"
-)
-
-const (
-	ReceiveBufferSize = 25
-	RequestQueueSize  = 25
-	ThirtySeconds     = 30 * time.Second
 )
 
 // ----------------------------------------------------------------------------------
@@ -28,6 +21,14 @@ func NewPeerState(bits *BitSet) PeerState {
 }
 
 // ----------------------------------------------------------------------------------
+// BlockOffset - the offset of a particular block in the torrent
+// ----------------------------------------------------------------------------------
+
+func blockOffset(index, begin, pieceSize int) int64 {
+	return int64(index) * int64(pieceSize) + int64(begin)
+}
+
+// ----------------------------------------------------------------------------------
 // Peer
 // ----------------------------------------------------------------------------------
 
@@ -38,6 +39,7 @@ type Peer struct {
 	id         *PeerIdentity
 	statistics *Statistics
 	logger     *log.Logger
+	blocks 	   set
 }
 
 func NewPeer(id *PeerIdentity,
@@ -52,6 +54,7 @@ func NewPeer(id *PeerIdentity,
 		logger:     logger,
 		statistics: NewStatistics(),
 		queue:      queue,
+		blocks: make(set),
 	}
 }
 
@@ -59,11 +62,12 @@ func (p *Peer) Id() *PeerIdentity {
 	return p.id
 }
 
-func OnMessages(msgs []ProtocolMessage, p *Peer) (error, []ProtocolMessage, []DiskOp) {
+func OnMessages(msgs []ProtocolMessage, p *Peer) (error, []ProtocolMessage, []DiskOp, []int64) {
 
 	// State to build during message processing
 	var out []ProtocolMessage
 	var ops []DiskOp
+	var blocks []int64
 	var err error
 	ws := p.state.ws
 	mp := p.pieceMap
@@ -76,7 +80,9 @@ func OnMessages(msgs []ProtocolMessage, p *Peer) (error, []ProtocolMessage, []Di
 
 		// Handle message
 		switch m := msg.(type) {
-		case Choke: ws = onChoke(ws, mp)
+		case Choke:
+			ws, blocks = onChoke(ws, p.blocks)
+			p.blocks = make(set)
 		case Unchoke: ws = onUnchoke(ws)
 		case Interested: ws = onInterested(ws)
 		case Uninterested: ws = onUninterested(ws)
@@ -109,12 +115,15 @@ func OnMessages(msgs []ProtocolMessage, p *Peer) (error, []ProtocolMessage, []Di
 	// Update peer state
 	p.state.ws = ws
 	p.state.bitfield = bf
-	return nil, out, ops
+	return nil, out, ops, blocks
 }
 
-func onChoke(ws WireState, mp *PieceMap/*, req set[Block]*/) WireState {
-	mp.ReturnBlocks([]Request{}) // TODO: Fix me to hand back BlockOffsets
-	return ws.Choked()
+func onChoke(ws WireState, blocks set) (WireState, []int64) {
+	ret := make([]int64, len(blocks))
+	for block, _ := range blocks {
+		ret = append(ret, block)
+	}
+	return ws.Choked(), ret
 }
 
 func onUnchoke(ws WireState) WireState {
@@ -139,9 +148,8 @@ func onHave(index int, ws WireState, bitfield *BitSet, mp *PieceMap) (error, Wir
 	var msg ProtocolMessage
 	if !bitfield.Have(index) {
 
-		// Update bitfield, check for remote seed & update availability
+		// Update bitfield & update availability
 		bitfield.Set(index)
-		ws = ws.Interested()
 		mp.Inc(index)
 
 		if isNowInteresting(index, ws, mp) {
@@ -219,10 +227,6 @@ func (p *Peer) Close() {
 
 func (p *Peer) QueuedRequests() int {
 	return p.queue.QueuedRequests()
-}
-
-func (p *Peer) CanDownload() bool {
-	return !p.state.ws.IsChoked() && p.state.ws.IsInteresting()
 }
 
 func (p *Peer) Choke() error {

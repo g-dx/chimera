@@ -34,7 +34,7 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequest
 	// For each unchoked & interesting peer calculate blocks to pick
 	pieces := make([]*Piece, 0, len(pieceMap.pieces))
 	for _, peer := range peers {
-		if peer.CanDownload() {
+		if peer.state.ws.CanDownload() {
 			// Find all pieces which this peer has which still require blocks
 //			peer.logger.Println("Picking for peer: ", peer.Id())
 			for _, piece := range pieceMap.pieces {
@@ -97,7 +97,7 @@ func PickPieces2(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolReques
 	picked := make(map[*Peer][]Request) // The blocks picked for each peer
 
 	for _, peer := range peers {
-		if peer.CanDownload() {
+		if peer.state.ws.CanDownload() {
 
 			// Find total required
 			n := peer.QueuedRequests() + requestTimer.BlocksWaiting(*peer.Id())
