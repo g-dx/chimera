@@ -85,7 +85,7 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) (*Peer, *Peer
 		}
 	}
 
-	// Iterate over peers and perform chokes & unchokes based on the position of the slowest
+	// Iterate over peers and calculate chokes & unchokes based on the position of the slowest
 	// peer to unchoke. Take care to not change the optimistic unchoke.
 	for i, p := range peers {
 		if p == new {
@@ -101,6 +101,7 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) (*Peer, *Peer
 	return old, new, chokes, unchokes
 }
 
+// Select a random peer to be the optimistic
 func chooseOptimistic(peers []*Peer) (*Peer, *Peer) {
 
 	var new *Peer
@@ -112,7 +113,7 @@ func chooseOptimistic(peers []*Peer) (*Peer, *Peer) {
 	return old, new
 }
 
-// Create the list of candidate optimistic unchoke peers. Also return
+// Create the list of candidate optimistic unchoke peers.
 func buildCandidates(peers []*Peer) ([]*Peer, *Peer) {
 
 	var cur *Peer
