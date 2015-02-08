@@ -23,7 +23,7 @@ const initWireState = 0x15
 type WireState byte
 
 func (ws WireState) CanDownload() bool {
-	return !ws.Choked() && ws.Interesting()
+	return !ws.IsChoked() && ws.IsInteresting()
 }
 
 func (ws WireState) IsOptimistic() bool {
