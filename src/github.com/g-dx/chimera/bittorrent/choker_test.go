@@ -288,9 +288,9 @@ func assertUnchoked(t *testing.T, peers ...*TestPeer) {
 
 func assertChokeStatus(t *testing.T, b bool, peers []*TestPeer) {
 	for _, p := range peers {
-		if p.IsChoked() != b {
+		if p.State().IsChoked() != b {
 			expected := fmt.Sprintf("p(%v) choke=%v", p.Id(), b)
-			actual := fmt.Sprintf("p(%v) choke=%v", p.Id(), p.IsChoked())
+			actual := fmt.Sprintf("p(%v) choke=%v", p.Id(), p.State().IsChoked())
 			t.Errorf(buildUnequalMessage(3, expected, actual))
 		}
 	}
@@ -302,37 +302,37 @@ type TestPeer struct {
 }
 
 func (tp *TestPeer) notChoking() *TestPeer {
-	tp.state.ws = tp.state.ws.NotChoking()
+	tp.ws = tp.ws.NotChoking()
 	return tp
 }
 
 func (tp *TestPeer) choking() *TestPeer {
-	tp.state.ws = tp.state.ws.Choking()
+	tp.ws = tp.ws.Choking()
 	return tp
 }
 
 func (tp *TestPeer) interesting() *TestPeer {
-	tp.state.ws = tp.state.ws.Interesting()
+	tp.ws = tp.ws.Interesting()
 	return tp
 }
 
 func (tp *TestPeer) notInteresting() *TestPeer {
-	tp.state.ws = tp.state.ws.NotInteresting()
+	tp.ws = tp.ws.NotInteresting()
 	return tp
 }
 
 func (tp *TestPeer) interested() *TestPeer {
-	tp.state.ws = tp.state.ws.Interested().NotNew()
+	tp.ws = tp.ws.Interested().NotNew()
 	return tp
 }
 
 func (tp *TestPeer) uninterested() *TestPeer {
-	tp.state.ws = tp.state.ws.NotInterested()
+	tp.ws = tp.ws.NotInterested()
 	return tp
 }
 
-func (tp *TestPeer) with(msgs ...ProtocolMessage) *TestPeer {
-	err, net, _, _ := OnMessages(msgs, tp.Peer)
+func (tp *TestPeer) with(mp *PieceMap, msgs ...ProtocolMessage) *TestPeer {
+	err, net, _, _ := OnMessages(msgs, tp.Peer, mp)
 	if err != nil {
 		panic(err)
 	}
@@ -345,13 +345,13 @@ func (tp *TestPeer) with(msgs ...ProtocolMessage) *TestPeer {
 
 func (tp *TestPeer) dl(rate int) *TestPeer {
 	tp.Stats().Download.rate = rate
-	tp.state.ws = tp.state.ws.NotNew()
+	tp.ws = tp.ws.NotNew()
 	return tp
 }
 
 func (tp *TestPeer) ul(rate int) *TestPeer {
 	tp.Stats().Upload.rate = rate
-	tp.state.ws = tp.state.ws.NotNew()
+	tp.ws = tp.ws.NotNew()
 	return tp
 }
 
@@ -368,7 +368,7 @@ func per(i int, pm *PieceMap) *TestPeer {
 	p := NewPeer(
 		&PeerIdentity{[20]byte{}, strconv.Itoa(i)},
 		NewQueue(out, func(int, int) {}),
-		pm,
+		len(pm.pieces),
 		log.New(os.Stdout, "", log.LstdFlags))
 	return &TestPeer{p, out}
 }

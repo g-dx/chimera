@@ -40,7 +40,7 @@ func (b ByTransferSpeed) Less(i, j int) bool {
 	if irate < jrate {
 		return false
 	}
-	if b.Peers[i].IsInterested() {
+	if b.Peers[i].State().IsInterested() {
 		return true
 	}
 	return false
@@ -63,7 +63,7 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) (*Peer, *Peer
 	n := 0
 	if changeOptimistic {
 		old, new = chooseOptimistic(peers)
-		if new != nil && new.IsInterested() {
+		if new != nil && new.State().IsInterested() {
 			n++
 		}
 	}
@@ -76,7 +76,7 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) (*Peer, *Peer
 		if p == new {
 			continue
 		}
-		if p.IsInterested() {
+		if p.State().IsInterested() {
 			n++
 			pos = i
 		}
@@ -91,10 +91,10 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) (*Peer, *Peer
 		if p == new {
 			continue
 		}
-		if i <= pos && p.IsChoking() {
+		if i <= pos && p.State().IsChoking() {
 			unchokes = append(unchokes, p)
 		}
-		if i > pos && !p.IsChoking() {
+		if i > pos && !p.State().IsChoking() {
 			chokes = append(chokes, p)
 		}
 	}
@@ -119,14 +119,14 @@ func buildCandidates(peers []*Peer) ([]*Peer, *Peer) {
 	var cur *Peer
 	c := make([]*Peer, 0, len(peers))
 	for _, p := range peers {
-		if p.IsOptimistic() {
+		if p.State().IsOptimistic() {
 			cur = p
 		}
 
 		// Newly connected peers 3x more likely to start
-		if p.IsChoking() {
+		if p.State().IsChoking() {
 			c = append(c, p)
-			if p.IsNew() {
+			if p.State().IsNew() {
 				c = append(c, p, p)
 			}
 		}

@@ -40,15 +40,15 @@ func TestPickPieces(t *testing.T) {
 	// Build a collection of peers in different states
 	// Peers 2, 4 & 10 are eligible for piece picking
 	p1 := per(1, pm).dl(1)
-	p2 := per(2, pm).dl(2).with(Bitfield([]byte{0xE0}), Unchoke{})
+	p2 := per(2, pm).dl(2).with(pm, Bitfield([]byte{0xE0}), Unchoke{})
 	p3 := per(3, pm)
-	p4 := per(4, pm).dl(4).with(Bitfield([]byte{0xE0}), Unchoke{})
+	p4 := per(4, pm).dl(4).with(pm, Bitfield([]byte{0xE0}), Unchoke{})
 	p5 := per(5, pm).dl(5)
 	p6 := per(6, pm)
-	p7 := per(7, pm).dl(7).with(Unchoke{})
+	p7 := per(7, pm).dl(7).with(pm, Unchoke{})
 	p8 := per(8, pm).dl(8)
-	p9 := per(9, pm).dl(9).with(Interested{})
-	p10 := per(10, pm).dl(10).with(Bitfield([]byte{0xE0}), Unchoke{})
+	p9 := per(9, pm).dl(9).with(pm, Interested{})
+	p10 := per(10, pm).dl(10).with(pm, Bitfield([]byte{0xE0}), Unchoke{})
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
 	defer teardown(peers)
 

@@ -114,7 +114,7 @@ func (ph *ProtocolHandler) loop() {
 			p := ph.findPeer(list.id)
 			if p != nil {
 				// Process all messages
-				err, net, disk, blocks := OnMessages(list.msgs, p)
+				err, net, disk, blocks := OnMessages(list.msgs, p, ph.pieceMap)
 				if err != nil {
 					ph.closePeer(p, err)
 					continue
@@ -233,7 +233,7 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 
 	// Connected
 	ph.logger.Printf("New Peer: %v\n", id)
-	ph.newPeers <- NewPeer(id, NewQueue(out, f), ph.pieceMap, ph.logger)
+	ph.newPeers <- NewPeer(id, NewQueue(out, f), len(ph.pieceMap.pieces), ph.logger)
 }
 
 func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
@@ -260,11 +260,11 @@ func (ph *ProtocolHandler) onTick(n int) {
 		old, new, chokes, unchokes := ChokePeers(ph.isSeed, ph.peers, n%optimisticChokeInterval == 0)
 		// Clear old optimistic
 		if old != nil {
-			old.state.ws = old.state.ws.NotOptimistic()
+			old.ws = old.ws.NotOptimistic()
 		}
 		// Set new optimistic
 		if new != nil {
-			new.state.ws = new.state.ws.Optimistic()
+			new.ws = new.ws.Optimistic()
 		}
 		// Send chokes
 		for _, p := range chokes {

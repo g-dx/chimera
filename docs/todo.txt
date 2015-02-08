@@ -7,6 +7,11 @@ Picker does the work of calculating block offsets and then discards them only to
 for the peer.blocks map. Picker should be refactored to return offsets and we can add a method to
 piecemap to return the length for a given offset.
 
++ Uninterested State Sending
+============================
+We are currently not sending uninterested to peers when they no longer have an pieces we are interested
+in.
+
 + Pure
 ======
 
