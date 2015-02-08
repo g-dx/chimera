@@ -51,6 +51,10 @@ With no way to alter the underlying slice.
 ================================
 The protocol class should use a map to quickly find a peer for a given id.
 
++ Refactor Choker Test
+======================
+The whole choker test should be refactorable (?) into a table driven test.
+
 + Define new read-only Peer interface
 =====================================
 This should be used as inputs to already side-effect free functions. First pass is this:
