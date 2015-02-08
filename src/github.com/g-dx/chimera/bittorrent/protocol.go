@@ -277,17 +277,15 @@ func (ph *ProtocolHandler) onTick(n int) {
 	}
 
 	// Run piece picking algorithm
-	PickPieces(ph.peers, ph.pieceMap, ph.requestTimer)
-//	pp := PickPieces(ph.peers, ph.pieceMap, ph.requestTimer)
-//	for id, blocks := range pp {
-//		p := ph.findPeer(id)
-//		for _, msg := range blocks {
-//			// Send, mark as requested & add to pending map
-//			p.Add(msg)
-//			ph.pieceMap.Requested(msg.index, msg.begin)
-//			// TODO: Add to peer pending set
-//		}
-//	}
+	pp := PickPieces(ph.peers, ph.pieceMap, ph.requestTimer)
+	for p, blocks := range pp {
+		for _, msg := range blocks {
+			// Send, mark as requested & add to pending map
+			p.Add(msg)
+			ph.pieceMap.SetBlock(msg.index, msg.begin, REQUESTED)
+			p.blocks.Add(toOffset(msg.index, msg.begin, ph.pieceMap.pieceSize))
+		}
+	}
 }
 
 

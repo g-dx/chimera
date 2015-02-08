@@ -226,7 +226,8 @@ func (p *Peer) Close() {
 }
 
 func (p *Peer) QueuedRequests() int {
-	return p.queue.QueuedRequests()
+//	return p.queue.QueuedRequests()
+	return 0 // TODO: Fix me
 }
 
 func (p *Peer) Choke() error {

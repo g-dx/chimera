@@ -7,6 +7,7 @@ const (
 
 type PieceMap struct {
 	pieces []*Piece
+	pieceSize int
 }
 
 func NewPieceMap(n, pieceLen int, len uint64) *PieceMap {
@@ -22,7 +23,7 @@ func NewPieceMap(n, pieceLen int, len uint64) *PieceMap {
 		lastPieceLen = pieceLen
 	}
 	pieces[n-1] = NewPiece(n-1, lastPieceLen)
-	return &PieceMap{pieces}
+	return &PieceMap{pieces, pieceLen}
 }
 
 func (pm PieceMap) IsComplete() bool {
@@ -87,6 +88,10 @@ func (p *PieceMap) ReturnBlocks(reqs []Request) {
 		// Reset block state to needed and ensure overall piece state is blocks needed
 		p.pieces[req.index].ReturnBlock(req)
 	}
+}
+
+func (p *PieceMap) SetBlock(index, begin int, state byte) {
+	p.pieces[index].blocks[begin/_16KB] = state
 }
 
 func (p *PieceMap) ReturnBlock(index, begin int) {

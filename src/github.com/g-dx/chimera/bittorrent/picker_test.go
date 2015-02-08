@@ -2,7 +2,36 @@ package bittorrent
 
 import "testing"
 
-// TODO: fix me!
+
+func TestPick(t *testing.T) {
+	// None taken, piece blocks all free, request all
+	taken := make(set)
+	n := 5
+	p := NewPiece(0, n* _16KB)
+	reqs, wanted, pieceDone := pick(taken, p, n, p.len)
+	if !wanted {
+		t.Errorf("Expected: peer done")
+	}
+	if !pieceDone{
+		t.Errorf("Expected: piece done")
+	}
+	if len(reqs) != n {
+		t.Errorf("Expected: len(reqs)=%v, Actual: %v", n, len(reqs))
+	}
+	msgs := []ProtocolMessage{Request{0, 0, _16KB},
+		           Request{0, 1*_16KB, _16KB},
+				   Request{0, 2*_16KB, _16KB},
+		           Request{0, 3*_16KB, _16KB},
+				   Request{0, 4*_16KB, _16KB}}
+	for i, msg := range reqs {
+		actual := ToString(msg)
+		expected := ToString(msgs[i])
+		if actual != expected {
+			t.Errorf("Expected: %v\nActual  : %v", expected, actual)
+		}
+	}
+}
+
 func TestPickPieces(t *testing.T) {
 
 	// Build a piecemap (nopieces=3, noblocks=10)
@@ -30,98 +59,80 @@ func TestPickPieces(t *testing.T) {
 		pt.CreateTimer(*p.Id())
 	}
 
-	PickPieces(peers, pm, pt)
+	// Pick pieces
+	picked := PickPieces(peers, pm, pt)
 
-	/**
-	  Note: Can use the following pattern:
-
-	  data := map[PeerIdentity]MessageList{
-	   // ... data here ....
-	  }
-	 */
-
-	// Build expected output
-	var testdata = []struct {
-		peer *TestPeer
-		list *MessageList
-	}{
-		{ p1, NewMessageList(p1.Id())},
-		{ p3, NewMessageList(p3.Id())},
-		{ p5, NewMessageList(p5.Id())},
-		{ p6, NewMessageList(p6.Id())},
-		{ p7, NewMessageList(p7.Id())},
-		{ p8, NewMessageList(p8.Id())},
-		{ p9, NewMessageList(p9.Id())},
-		{ p10, NewMessageList(p10.Id(),
-			Interested{},
-			Request{0, 0, _16KB},
-			Request{0, 1*_16KB, _16KB},
-			Request{0, 2*_16KB, _16KB},
-			Request{0, 3*_16KB, _16KB},
-			Request{0, 4*_16KB, _16KB},
-			Request{0, 5*_16KB, _16KB},
-			Request{0, 6*_16KB, _16KB},
-			Request{0, 7*_16KB, _16KB},
-			Request{0, 8*_16KB, _16KB},
-			Request{0, 9*_16KB, _16KB},
-		)},
-		{ p4, NewMessageList(p4.Id(),
+	testData := map[*TestPeer][]ProtocolMessage {
+		 p1: []ProtocolMessage{},
+		 p3: []ProtocolMessage{},
+		 p5: []ProtocolMessage{},
+		 p6: []ProtocolMessage{},
+		 p7: []ProtocolMessage{},
+		 p8: []ProtocolMessage{},
+		 p9: []ProtocolMessage{},
+		 p10: []ProtocolMessage{
+			 Interested{},
+			 Request{0, 0, _16KB},
+			 Request{0, 1 * _16KB, _16KB},
+			 Request{0, 2 * _16KB, _16KB},
+			 Request{0, 3 * _16KB, _16KB},
+			 Request{0, 4 * _16KB, _16KB},
+			 Request{0, 5 * _16KB, _16KB},
+			 Request{0, 6 * _16KB, _16KB},
+			 Request{0, 7 * _16KB, _16KB},
+			 Request{0, 8 * _16KB, _16KB},
+			 Request{0, 9 * _16KB, _16KB},
+		 },
+		p4: []ProtocolMessage{
 			Interested{},
 			Request{1, 0, _16KB},
-			Request{1, 1*_16KB, _16KB},
-			Request{1, 2*_16KB, _16KB},
-			Request{1, 3*_16KB, _16KB},
-			Request{1, 4*_16KB, _16KB},
-			Request{1, 5*_16KB, _16KB},
-			Request{1, 6*_16KB, _16KB},
-			Request{1, 7*_16KB, _16KB},
-			Request{1, 8*_16KB, _16KB},
-			Request{1, 9*_16KB, _16KB},
-		)},
-		{ p2, NewMessageList(p2.Id(),
+			Request{1, 1 * _16KB, _16KB},
+			Request{1, 2 * _16KB, _16KB},
+			Request{1, 3 * _16KB, _16KB},
+			Request{1, 4 * _16KB, _16KB},
+			Request{1, 5 * _16KB, _16KB},
+			Request{1, 6 * _16KB, _16KB},
+			Request{1, 7 * _16KB, _16KB},
+			Request{1, 8 * _16KB, _16KB},
+			Request{1, 9 * _16KB, _16KB},
+		},
+		p2: []ProtocolMessage{
 			Interested{},
 			Request{2, 0, _16KB},
-			Request{2, 1*_16KB, _16KB},
-			Request{2, 2*_16KB, _16KB},
-			Request{2, 3*_16KB, _16KB},
-			Request{2, 4*_16KB, _16KB},
-			Request{2, 5*_16KB, _16KB},
-			Request{2, 6*_16KB, _16KB},
-			Request{2, 7*_16KB, _16KB},
-			Request{2, 8*_16KB, _16KB},
-			Request{2, 9*_16KB, _16KB},
-		)},
+			Request{2, 1 * _16KB, _16KB},
+			Request{2, 2 * _16KB, _16KB},
+			Request{2, 3 * _16KB, _16KB},
+			Request{2, 4 * _16KB, _16KB},
+			Request{2, 5 * _16KB, _16KB},
+			Request{2, 6 * _16KB, _16KB},
+			Request{2, 7 * _16KB, _16KB},
+			Request{2, 8 * _16KB, _16KB},
+			Request{2, 9 * _16KB, _16KB},
+		},
 	}
 
-//	t.Logf("%v", picked)
-//
-//	for p, msgs := range picked {
-//		data := testdata[0]
-//			if data.peer.Id().Equals(p.Id()) {
-//				for _, msg := range data.list.msgs {
-//					for _, msg2 := range msgs {
-//						actual := ToString(msg)
-//						expected := ToString(msg2)
-//						if actual != expected {
-//							t.Errorf("\nPeer: %v\nExpected: %v\nActual  : %v",
-//								p.Id(), expected, actual)
-//						}
-//					}
-//				}
-//			}
-//	}
+	t.Logf("%v", picked)
 
-	// Check outgoing message of all peers
-	for _, tt := range testdata {
-		for _, msg := range tt.list.msgs {
-			// TODO: Should implement an eqivalence() method
-			expected := ToString(msg)
-			actual := ToString(<- tt.peer.out)
-			if actual != expected {
-				t.Errorf("\nPeer: %v\nExpected: %v\nActual  : %v",
-					tt.peer.Id(), expected, actual)
+	for p, actualMsgs := range picked {
+		expectedMsgs := getExpected(p, testData)
+			for _, expectedMsg := range expectedMsgs {
+				for _, actualMsg := range actualMsgs {
+					actual := ToString(actualMsg)
+					expected := ToString(expectedMsg)
+					if actual != expected {
+						t.Errorf("\nPeer: %v\nExpected: %v\nActual  : %v",
+							p.Id(), expected, actual)
+					}
+				}
 			}
-		}
 	}
 }
 
+func getExpected(p *Peer, testData map[*TestPeer][]ProtocolMessage) []ProtocolMessage {
+	for key, value := range testData {
+		if key.Peer.Id().Equals(key.Id()) {
+			return value
+		}
+	}
+	return nil
+}
