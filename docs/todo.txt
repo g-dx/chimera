@@ -1,6 +1,13 @@
 TODO:
 =========
 
++ Protocol Refactor
+=================
+Should be changed to work like Buffer, that is no struct - simply a function which receive everything it needs to do
+its job. The loop function should probably look something like this:
+
+func protocolLoop(disk chan<-DiskMessage, res <-chan DiskResultMessage, p *pieceMap) (details <-chan Details, done <-chan struct{}, stop chan<-struct{})
+
 + Picker Refactor
 =================
 Picker does the work of calculating block offsets and then discards them only to recalculate them again
