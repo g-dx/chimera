@@ -46,7 +46,7 @@ func TestDiskReadAndWrite(t *testing.T) {
 
 	// I/O
 	layout := NewDiskLayout(files, uint32(pieceSize), uint64(downloadSize))
-	fileio := NewFileIO(layout, logger)
+	diskio := NewDiskIO(layout, logger)
 
 	// Read back contents and check hash
 	for i := 0 ; i < len(hashes) ; i++ {
@@ -69,7 +69,7 @@ func TestDiskReadAndWrite(t *testing.T) {
 			}
 
 			// Read block
-			err := fileio.ReadAt(buf[off:off+n], i, off)
+			err := diskio.ReadAt(buf[off:off+n], i, off)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -118,7 +118,7 @@ func CacheWrite(t *testing.T) {
 	layout := NewDiskLayout(files, uint32(pieceSize), uint64(downloadSize))
 
 	// Create buffered channel for test purposes...
-	diskOps := make(chan DiskOpResult, 1)
+	diskOps := make(chan DiskMessageResult, 1)
 	cacheIo := NewCacheIO(layout, hashes, blockSize, diskOps, &NullIO{})
 
 	// Write block
@@ -165,7 +165,7 @@ func CacheWrite(t *testing.T) {
 
 func TestDisk(t *testing.T) {
 	// Create buffered channel for test purposes...
-	diskOps := make(chan DiskOpResult, 1)
+	diskOps := make(chan DiskMessageResult, 1)
 	disk := NewDisk(&NullIO{}, diskOps)
 	defer disk.Close()
 	id := &PeerIdentity{[20]byte{}, "id"}
@@ -210,12 +210,8 @@ func createTestData(miFiles []MetaInfoFile, pieceSize int) (data []byte, hashes 
 		downloadSize += int64(f.Length)
 	}
 
-	log.Printf("Size: %v", downloadSize)
-
 	data = make([]byte, downloadSize)
 	hashes = make([][]byte, int(math.Ceil(float64(downloadSize) / float64(pieceSize))))
-
-	log.Printf("Hashes: %v", len(hashes))
 
 	written := 0
 	piece := 0

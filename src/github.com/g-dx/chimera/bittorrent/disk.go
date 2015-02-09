@@ -16,18 +16,18 @@ const (
 )
 
 var errPieceHashIncorrect = errors.New("Piece hash was incorrect.")
-var empty = make([]DiskOp, 0)
+var empty = make([]DiskMessage, 0)
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // Disk Op
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type DiskOp interface {
+type DiskMessage interface {
 }
 
-type WriteOp Block
-type ReadOp struct {
+type WriteMessage Block
+type ReadMessage struct {
 	id    *PeerIdentity
 	block Block
 }
@@ -37,7 +37,7 @@ type ReadOp struct {
 // Disk Op Results
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type DiskOpResult interface {
+type DiskMessageResult interface {
 }
 
 type ErrorResult struct {
@@ -81,16 +81,16 @@ func NewDiskLayout(files []File, pieceSize uint32, size uint64) *DiskLayout {
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type Disk struct {
-	in chan DiskOp
-	out chan DiskOpResult
+	in chan DiskMessage
+	out chan DiskMessageResult
 	done chan struct{}
 	io IO
 }
 
-func NewDisk(io IO, out chan DiskOpResult) *Disk {
+func NewDisk(io IO, out chan DiskMessageResult) *Disk {
 
 	// Create, start & return
-	disk := &Disk{make(chan DiskOp, 50), out, make(chan struct{}), io}
+	disk := &Disk{make(chan DiskMessage, 50), out, make(chan struct{}), io}
 	go disk.loop()
 	return disk
 }
@@ -101,7 +101,7 @@ func (d * Disk) loop() {
 
 		// Execute any outstanding ops
 		for len(ops) != 0 {
-			ops = d.executeOp(ops)
+			ops = d.execute(ops)
 		}
 
 		// Read new ops
@@ -119,40 +119,40 @@ func (d * Disk) loop() {
 }
 
 func (d * Disk) Read(id *PeerIdentity, block Block) {
-	d.in <- ReadOp{id, block}
+	d.in <- ReadMessage{id, block}
 }
 
 func (d * Disk) Write( block Block) {
-	d.in <- WriteOp(block)
+	d.in <- WriteMessage(block)
 }
 
-func (d * Disk) executeOp(ops []DiskOp) []DiskOp {
+func (d * Disk) execute(msgs []DiskMessage) []DiskMessage {
 
-	o := ops[0]
-	ops = ops[1:]
+	msg := msgs[0]
+	msgs = msgs[1:]
 
- 	switch op := o.(type) {
-	case ReadOp:
-		err := d.io.ReadAt(op.block.block, int(op.block.index), int(op.block.begin))
+ 	switch m := msg.(type) {
+	case ReadMessage:
+		err := d.io.ReadAt(m.block.block, int(m.block.index), int(m.block.begin))
 		if err != nil {
 			d.out <- ErrorResult{"read", err}
 		} else {
-			d.out <- ReadOk{op.id, op.block}
+			d.out <- ReadOk{m.id, m.block}
 		}
-	case WriteOp:
-		err := d.io.WriteAt(op.block, int(op.index), int(op.begin))
+	case WriteMessage:
+		err := d.io.WriteAt(m.block, int(m.index), int(m.begin))
 		if err == errPieceHashIncorrect {
-			d.out <- HashFailed(int(op.index))
+			d.out <- HashFailed(int(m.index))
 		} else if err != nil {
 			d.out <- ErrorResult{"write", err}
 		} else {
-			d.out <- WriteOk(int(op.index))
+			d.out <- WriteOk(int(m.index))
 		}
 
 	default:
-		panic(fmt.Sprintf("unknown op: %v", op))
+		panic(fmt.Sprintf("unknown op: %v", m))
 	}
-	return ops
+	return msgs
 }
 
 func (d * Disk) Close() error {
@@ -184,12 +184,12 @@ type CacheIO struct {
 	io IO
 	blockSize int
 	layout *DiskLayout
-	out chan DiskOpResult
+	out chan DiskMessageResult
 	hashes [][]byte
 	w map[int]*WriteBuffer
 }
 
-func NewCacheIO(layout *DiskLayout, hashes[][]byte, blockSize int, out chan DiskOpResult, io IO) *CacheIO {
+func NewCacheIO(layout *DiskLayout, hashes[][]byte, blockSize int, out chan DiskMessageResult, io IO) *CacheIO {
 	return &CacheIO{io, blockSize, layout, out, hashes, make(map[int]*WriteBuffer)}
 }
 
@@ -268,14 +268,13 @@ type File struct {
 // Disk IO
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-// TODO: Rename to DiskIO
-type FileIO struct {
+type DiskIO struct {
 	layout *DiskLayout
 	lens  []int64
 	log   *log.Logger
 }
 
-func NewFileIO(layout *DiskLayout, log *log.Logger) *FileIO {
+func NewDiskIO(layout *DiskLayout, log *log.Logger) *DiskIO {
 
 	var l int64
 	lens := make([]int64, 0, len(files))
@@ -287,7 +286,7 @@ func NewFileIO(layout *DiskLayout, log *log.Logger) *FileIO {
 	}
 
 	// Create & start
-	da := &FileIO{
+	da := &DiskIO{
 		layout: layout,
 		lens:  lens,
 		log:   log,
@@ -295,15 +294,15 @@ func NewFileIO(layout *DiskLayout, log *log.Logger) *FileIO {
 	return da
 }
 
-func (da *FileIO) WriteAt(p []byte, index, off int) error {
+func (da *DiskIO) WriteAt(p []byte, index, off int) error {
 	return da.onIO(p, index, off, onWriteBlock)
 }
 
-func (da *FileIO) ReadAt(p []byte, index, off int) error {
+func (da *DiskIO) ReadAt(p []byte, index, off int) error {
 	return da.onIO(p, index, off, onReadBlock)
 }
 
-func (da *FileIO) Close() error {
+func (da *DiskIO) Close() error {
 	var err error
 	for _, f := range da.layout.files {
 		e := f.Close()
@@ -314,7 +313,7 @@ func (da *FileIO) Close() error {
 	return err
 }
 
-func (da FileIO) onIO(buf []byte, index, begin int,
+func (da DiskIO) onIO(buf []byte, index, begin int,
 	ioFn func(File, []byte, int64) (int, error)) error {
 
 	// Calculate starting positions
@@ -348,7 +347,7 @@ func (da FileIO) onIO(buf []byte, index, begin int,
 	return io.ErrUnexpectedEOF
 }
 
-func (da * FileIO) initIO(index, begin int) (int, int64, int64) {
+func (da * DiskIO) initIO(index, begin int) (int, int64, int64) {
 
 	// Calc offset into files
 	off := int64(index * da.layout.pieceSize) + int64(begin)

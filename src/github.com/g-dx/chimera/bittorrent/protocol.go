@@ -38,7 +38,7 @@ type ProtocolHandler struct {
 	isSeed           bool
 	requestTimer     *ProtocolRequestTimer
 	disk             *Disk
-	diskOps          chan DiskOpResult
+	diskOps          chan DiskMessageResult
 }
 
 func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*ProtocolHandler, error) {
@@ -57,10 +57,9 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 	}
 
 	// Create disk
-	ops := make(chan DiskOpResult)
+	ops := make(chan DiskMessageResult)
 	layout := NewDiskLayout(files, mi.PieceLength, mi.TotalLength())
-	fileio := NewFileIO(layout, logger)
-	cacheio := NewCacheIO(layout, mi.Hashes, _16KB, ops, fileio)
+	cacheio := NewCacheIO(layout, mi.Hashes, _16KB, ops, NewDiskIO(layout, logger))
 	disk := NewDisk(cacheio, ops)
 
 	// Create piece map
@@ -148,7 +147,7 @@ func (ph *ProtocolHandler) loop() {
 	}
 }
 
-func (ph *ProtocolHandler) onDisk(op DiskOpResult) {
+func (ph *ProtocolHandler) onDisk(op DiskMessageResult) {
 	switch r := op.(type) {
 	case ReadOk:
 		p := ph.findPeer(r.id)

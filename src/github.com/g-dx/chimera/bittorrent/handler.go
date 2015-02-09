@@ -2,7 +2,7 @@ package bittorrent
 
 // Handler functions
 type OutgoingMessagesHandler func ([]ProtocolMessage, *Peer)
-type IncomingMessagesHandler func ([]ProtocolMessage, *Peer, *PieceMap) (error, []ProtocolMessage, []DiskOp, []int64)
+type IncomingMessagesHandler func ([]ProtocolMessage, *Peer, *PieceMap) (error, []ProtocolMessage, []DiskMessage, []int64)
 
 // Updates the peer in preparation for sending a message
 func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) {
@@ -24,11 +24,11 @@ func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) {
 }
 
 // Updates the peer in response to receiving a message
-func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []ProtocolMessage, []DiskOp, []int64) {
+func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []ProtocolMessage, []DiskMessage, []int64) {
 
 	// State to build during message processing
 	var out []ProtocolMessage
-	var ops []DiskOp
+	var ops []DiskMessage
 	var blocks []int64
 	var err error
 	ws := p.ws
@@ -37,7 +37,7 @@ func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []
 	for _, msg := range msgs {
 
 		var pm ProtocolMessage
-		var op DiskOp
+		var op DiskMessage
 
 		// Handle message
 		switch m := msg.(type) {
@@ -125,7 +125,7 @@ func onCancel(index, begin, length int) error {
 	return nil
 }
 
-func onRequest(index, begin, length int) (error, DiskOp) {
+func onRequest(index, begin, length int) (error, DiskMessage) {
 
 	// TODO: Check request valid
 	//	p.pieceMap.IsValid()
@@ -135,12 +135,12 @@ func onRequest(index, begin, length int) (error, DiskOp) {
 	return nil, nil
 }
 
-func onBlock(index, begin int, block []byte, s *Statistics, id *PeerIdentity) (error, DiskOp) {
+func onBlock(index, begin int, block []byte, s *Statistics, id *PeerIdentity) (error, DiskMessage) {
 	// NOTE: Already on the way to disk...
 	// p.disk.Write(index, begin, length, p.id)
 	//	p.disk.Write(index, begin, block)
 	s.Download.Add(len(block))
-	return nil, ReadOp{id, Block{index, begin, block}}
+	return nil, ReadMessage{id, Block{index, begin, block}}
 }
 
 func onBitfield(bits []byte, ws WireState, mp *PieceMap) (error, *BitSet, WireState, ProtocolMessage) {
