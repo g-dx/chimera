@@ -114,7 +114,7 @@ func (ph *ProtocolHandler) loop() {
 			p := ph.findPeer(list.id)
 			if p != nil {
 				// Process all messages
-				err, net, disk, blocks := OnMessages(list.msgs, p, ph.pieceMap)
+				err, net, disk, blocks := OnReceiveMessages(list.msgs, p, ph.pieceMap)
 				if err != nil {
 					ph.closePeer(p, err)
 					continue

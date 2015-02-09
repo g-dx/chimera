@@ -1,6 +1,30 @@
 package bittorrent
 
-func OnMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []ProtocolMessage, []DiskOp, []int64) {
+// Handler functions
+type OutgoingMessagesHandler func ([]ProtocolMessage, *Peer)
+type IncomingMessagesHandler func ([]ProtocolMessage, *Peer, *PieceMap) (error, []ProtocolMessage, []DiskOp, []int64)
+
+// Updates the peer in preparation for sending a message
+func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) {
+
+    for _, msg := range msgs {
+        switch m := msg.(type) {
+            case Choke: p.ws = p.ws.Choking()
+            case Unchoke: p.ws = p.ws.NotChoking()
+            case Interested: p.ws = p.ws.Interested()
+            case Uninterested: p.ws = p.ws.NotInterested()
+            case Cancel: // TODO: Remove from peer blocks
+            case Request: p.blocks.Add(toOffset(m.index, m.begin, mp.pieceSize))
+            case Bitfield, Have, Block, KeepAlive:
+            // No peer state change at present
+            default:
+            // No peer state change at present
+        }
+    }
+}
+
+// Updates the peer in response to receiving a message
+func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []ProtocolMessage, []DiskOp, []int64) {
 
 	// State to build during message processing
 	var out []ProtocolMessage
@@ -90,7 +114,6 @@ func onHave(index int, ws WireState, bitfield *BitSet, mp *PieceMap) (error, Wir
 		mp.Inc(index)
 
 		if isNowInteresting(index, ws, mp) {
-			ws = ws.Interesting()
 			msg = Interested{}
 		}
 	}
@@ -135,7 +158,6 @@ func onBitfield(bits []byte, ws WireState, mp *PieceMap) (error, *BitSet, WireSt
 	var msg ProtocolMessage
 	for i := 0; i < bitfield.Size(); i++ {
 		if mp.Piece(i).RequestsRequired() {
-			ws = ws.Interesting()
 			msg = Interested{}
 			break
 		}
