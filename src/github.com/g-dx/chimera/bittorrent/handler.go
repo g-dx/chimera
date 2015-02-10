@@ -14,7 +14,8 @@ func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) {
             case Uninterested: p.ws = p.ws.NotInterested()
             case Cancel: // TODO: Remove from peer blocks
             case Request: p.blocks.Add(toOffset(m.index, m.begin, mp.pieceSize))
-            case Bitfield, Have, Block, KeepAlive, Interested:
+            case Have: // TODO: Check if we are not interested anymore
+            case Bitfield, Block, KeepAlive, Interested:
             // No peer state change at present
             default:
             // No peer state change at present
