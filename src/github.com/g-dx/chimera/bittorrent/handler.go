@@ -114,7 +114,7 @@ func onHave(index int, ws WireState, bitfield *BitSet, mp *PieceMap) (error, Wir
 		mp.Inc(index)
 
 		if isNowInteresting(index, ws, mp) {
-			ws = ws.Interested()
+			ws = ws.Interesting()
 			msg = Interested{}
 		}
 	}
@@ -159,6 +159,7 @@ func onBitfield(bits []byte, ws WireState, mp *PieceMap) (error, *BitSet, WireSt
 	var msg ProtocolMessage
 	for i := 0; i < bitfield.Size(); i++ {
 		if mp.Piece(i).RequestsRequired() {
+			ws = ws.Interesting()
 			msg = Interested{}
 			break
 		}
