@@ -11,11 +11,10 @@ func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) {
         switch m := msg.(type) {
             case Choke: p.ws = p.ws.Choking()
             case Unchoke: p.ws = p.ws.NotChoking()
-            case Interested: p.ws = p.ws.Interested()
             case Uninterested: p.ws = p.ws.NotInterested()
             case Cancel: // TODO: Remove from peer blocks
             case Request: p.blocks.Add(toOffset(m.index, m.begin, mp.pieceSize))
-            case Bitfield, Have, Block, KeepAlive:
+            case Bitfield, Have, Block, KeepAlive, Interested:
             // No peer state change at present
             default:
             // No peer state change at present
@@ -114,6 +113,7 @@ func onHave(index int, ws WireState, bitfield *BitSet, mp *PieceMap) (error, Wir
 		mp.Inc(index)
 
 		if isNowInteresting(index, ws, mp) {
+			ws = ws.Interested()
 			msg = Interested{}
 		}
 	}
