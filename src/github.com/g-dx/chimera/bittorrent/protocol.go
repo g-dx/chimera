@@ -24,36 +24,19 @@ type PeerConnectResult struct {
 	ok   bool
 }
 
-type ProtocolHandler struct {
-	metaInfo         *MetaInfo
-	peers            []*Peer
-	trackerResponses <-chan *TrackerResponse
-	newPeers         chan *Peer
-	pieceMap         *PieceMap
-	done             chan struct{}
-	dir              string
-	logger           *log.Logger
-	peerMsgs         chan *MessageList
-	peerErrors       chan PeerError
-	isSeed           bool
-	requestTimer     *ProtocolRequestTimer
-	disk             *Disk
-	diskOps          chan DiskMessageResult
-}
-
-func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*ProtocolHandler, error) {
+func StartProtocol(mi *MetaInfo, dir string) (error, chan struct{}, chan struct{}) {
 
 	// Create log file & create loggers
 	f, err := os.Create(fmt.Sprintf("%v/protocol.log", dir))
 	if err != nil {
-		return nil, err
+		return err, nil, nil
 	}
 	logger := log.New(f, "", log.Ldate|log.Ltime)
 
 	// Create disk files
 	files, err := CreateOrRead(mi.Files, fmt.Sprintf("%v/files", dir))
 	if err != nil {
-		return nil, err
+		return err, nil, nil
 	}
 
 	// Create disk
@@ -65,57 +48,60 @@ func NewProtocolHandler(mi *MetaInfo, dir string, tr <-chan *TrackerResponse) (*
 	// Create piece map
 	pieceMap := NewPieceMap(len(mi.Hashes), int(mi.PieceLength), mi.TotalLength())
 
-	// Create coordinator
-	ph := &ProtocolHandler{
-		metaInfo:         mi,
-		peers:            make([]*Peer, 0, idealPeers),
-		trackerResponses: tr,
-		newPeers:         make(chan *Peer),
-		pieceMap:         pieceMap,
-		done:             make(chan struct{}),
-		dir:              dir,
-		logger:           logger,
-		peerMsgs:         make(chan *MessageList, 100),
-		peerErrors:       make(chan PeerError),
-		isSeed:           false,
-		disk:             disk,
-		diskOps:          ops,
+	// Channels to notify callers
+	done := make(chan struct{})
+	stop := make(chan struct{})
+
+	// Start connection listener
+	cl, err := NewConnectionListener(make(chan *PeerConnection), "localhost:60001") // TODO: Externalise
+	if err != nil {
+		return err, nil, nil
 	}
 
 	// Start loop & return
-	go ph.loop()
-	return ph, nil
+	go protocolLoop(dir, pieceMap, disk, ops)
+	return err, done, stop
 }
 
-func (ph *ProtocolHandler) AwaitDone() {
-	// Await a receive to say we are finished...
-	<-ph.done
-}
+// TODO: Probably replace many of these vars with a ProtocolConfiguration struct containing:
+// - logger
+// - channel sizes
+// - output dir
+// - choker function
+// - picker function
+// - tracker query interval
+// - port to listen on
+func protocolLoop(dir string, pieceMap *PieceMap, d *Disk, diskOps chan DiskMessageResult, logger *log.Logger, listener *ConnectionListener) {
 
-func (ph *ProtocolHandler) Close() {
-	// TODO: !!!
-}
-
-func (ph *ProtocolHandler) loop() {
-
+	peers := make([]*Peer, 0, idealPeers)
+	newPeers := make(chan *Peer)
+	peerMsgs := make(chan *MessageList, 100)
+	peerErrors := make(chan PeerError)
+	isSeed := pieceMap.IsComplete()
 	tick := 0
+
+	trackerResponses := startTracker() // TODO: require tracker URLs from metainfo
+
 	for {
 
 		select {
 		case <-time.After(oneSecond):
-			ph.onTick(tick)
+			onTick(tick, peers, pieceMap, isSeed)
 			tick++
 
-		case r := <-ph.trackerResponses:
-			ph.onTrackerResponse(r)
+		case r := <-trackerResponses:
+			addrs := onTrackerResponse(r, len(peers))
+			for _, pa := range addrs {
+				go handlePeerConnect(pa, dir, logger, peerMsgs, peerErrors, newPeers, len(pieceMap.pieces))
+			}
 
-		case list := <-ph.peerMsgs:
-			p := ph.findPeer(list.id)
+		case list := <-peerMsgs:
+			p := findPeer(list.id, peers)
 			if p != nil {
 				// Process all messages
-				err, net, disk, blocks := OnReceiveMessages(list.msgs, p, ph.pieceMap)
+				err, net, disk, blocks := OnReceiveMessages(list.msgs, p, pieceMap)
 				if err != nil {
-					ph.closePeer(p, err)
+					closePeer(p, err)
 					continue
 				}
 				// Send to net
@@ -124,7 +110,7 @@ func (ph *ProtocolHandler) loop() {
 				}
 				// Send to disk
 				for _, msg := range disk {
-					ph.disk.in <- msg
+					disk.in <- msg
 				}
 				// Return blocks to piecemap
 				for _, _ = range blocks {
@@ -132,84 +118,95 @@ func (ph *ProtocolHandler) loop() {
 				}
 			}
 
-		case e := <-ph.peerErrors:
-			p := ph.findPeer(e.id)
+		case e := <-peerErrors:
+			p := findPeer(e.id, peers)
 			if p != nil {
-				ph.closePeer(p, e.err)
+				closePeer(p, e.err)
 			}
 
-		case p := <-ph.newPeers:
-			ph.peers = append(ph.peers, p)
+		case p := <-newPeers:
+			peers = append(peers, p)
 
-		case d := <-ph.diskOps:
-			ph.onDisk(d)
+		case d := <-diskOps:
+			onDisk(d, peers, logger, pieceMap, done)
+
+		case c := <-listener.conns:
+			if len(peers) < idealPeers {
+				go handlePeerEstablish(c, dir, logger, peerMsgs, peerErrors, newPeers, len(pieceMap.pieces), false)
+			}
 		}
 	}
 }
 
-func (ph *ProtocolHandler) onDisk(op DiskMessageResult) {
+// TODO: This function should be broken down into onWriteOk(...), onReadOk(...) and the switch on type moved to the main loop
+func onDisk(op DiskMessageResult, peers []*Peer, logger *log.Logger, pieceMap *PieceMap, done chan struct{}) {
 	switch r := op.(type) {
 	case ReadOk:
-		p := ph.findPeer(r.id)
+		p := findPeer(r.id, peers)
 		if p != nil {
 			p.Add(r.block)
-			ph.logger.Printf("block [%v, %v] added to peer Q [%v]\n", r.block.index, r.block.begin, r.id)
+			logger.Printf("block [%v, %v] added to peer Q [%v]\n", r.block.index, r.block.begin, r.id)
 		}
 	case WriteOk:
 		// Nothing to do
 	case PieceOk:
-		ph.logger.Printf("piece [%v] written to disk\n", r)
+		logger.Printf("piece [%v] written to disk\n", r)
 
 		// Mark piece as complete
-		ph.pieceMap.Get(int(r)).Complete()
+		pieceMap.Get(int(r)).Complete()
 
 		// Send haves
-		for _, p := range ph.peers {
+		for _, p := range peers {
 			p.Add(Have(r))
 		}
 
 		// Are we complete?
-		if ph.pieceMap.IsComplete() {
-			close(ph.done) // Yay!
+		if pieceMap.IsComplete() {
+			close(done) // Yay!
 		}
 	case HashFailed:
 		// Reset piece
-		ph.pieceMap.Get(int(r)).Reset()
+		pieceMap.Get(int(r)).Reset()
 
 	case ErrorResult:
-		ph.logger.Panicf("Disk [%v] Failed: %v\n", r.op, r.err)
+		logger.Panicf("Disk [%v] Failed: %v\n", r.op, r.err)
 	}
 }
 
-func (ph *ProtocolHandler) onTrackerResponse(r *TrackerResponse) {
+func onTrackerResponse(r *TrackerResponse, peerCount int) []PeerAddress {
 
-	peerCount := len(ph.peers)
+	var addrs []PeerAddress
 	if peerCount < idealPeers {
-
-		// Add some
 		for _, pa := range r.PeerAddresses[25:] {
-			go ph.handlePeerConnect(pa)
+			addrs = append(addrs, pa)
 			peerCount++
 			if peerCount == idealPeers {
 				break
 			}
 		}
 	}
+	return addrs
 }
 
-func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
+func handlePeerConnect(addr PeerAddress, dir string, logger *log.Logger, peerMsgs chan *MessageList,
+	peerErrors chan<-PeerError, newPeers chan *Peer, noOfPieces int) {
 
 	conn, err := NewConnection(addr.GetIpAndPort())
 	if err != nil {
-		ph.logger.Printf("Can't connect to [%v]: %v\n", addr, err)
+		logger.Printf("Can't connect to [%v]: %v\n", addr, err)
 		return
 	}
+	handlePeerEstablish(conn, dir, logger, peerMsgs, peerErrors, newPeers, noOfPieces, true)
+}
+
+func handlePeerEstablish(conn *PeerConnection, dir string, logger *log.Logger, peerMsgs chan *MessageList,
+	peerErrors chan<-PeerError, newPeers chan *Peer, noOfPieces int, outgoing bool) {
 
 	// Create log file & create loggers
-	path := fmt.Sprintf("%v/%v.log", ph.dir, conn.in.conn.RemoteAddr())
+	path := fmt.Sprintf("%v/%v.log", dir, conn.in.conn.RemoteAddr())
 	file, err := os.Create(path)
 	if err != nil {
-		ph.logger.Printf("Can't create log file [%v]\n", path)
+		logger.Printf("Can't create log file [%v]\n", path)
 		conn.Close()
 		return
 	}
@@ -217,9 +214,9 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 	out := make(chan ProtocolMessage)
 
 	// Attempt to establish connection
-	id, err := conn.Establish(out, ph.peerMsgs, ph.peerErrors, Handshake(ph.metaInfo.InfoHash), file, true)
+	id, err := conn.Establish(out, peerMsgs, peerErrors, Handshake(ph.metaInfo.InfoHash), file, outgoing)
 	if err != nil {
-		ph.logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
+		logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
 		conn.Close()
 		return
 	}
@@ -231,11 +228,11 @@ func (ph *ProtocolHandler) handlePeerConnect(addr PeerAddress) {
 	}
 
 	// Connected
-	ph.logger.Printf("New Peer: %v\n", id)
-	ph.newPeers <- NewPeer(id, NewQueue(out, f), len(ph.pieceMap.pieces), ph.logger)
+	logger.Printf("New Peer: %v\n", id)
+	newPeers <- NewPeer(id, NewQueue(out, f), noOfPieces, logger)
 }
 
-func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
+func closePeer(peer *Peer, err error) {
 
 	// TODO:
 
@@ -244,19 +241,19 @@ func (ph *ProtocolHandler) closePeer(peer *Peer, err error) {
 	// 3. Log errors
 }
 
-func (ph *ProtocolHandler) onTick(n int) {
+func onTick(n int, peers []*Peer, pieceMap *PieceMap, isSeed bool) {
 
 	// Check for expired requests
-	ph.requestTimer.Tick(n)
+//	requestTimer.Tick(n)
 
 	// Update peer stats
-	for _, p := range ph.peers {
+	for _, p := range peers {
 		p.Stats().Update()
 	}
 
 	// Run choking algorithm
 	if n%chokeInterval == 0 {
-		old, new, chokes, unchokes := ChokePeers(ph.isSeed, ph.peers, n%optimisticChokeInterval == 0)
+		old, new, chokes, unchokes := ChokePeers(isSeed, peers, n%optimisticChokeInterval == 0)
 		// Clear old optimistic
 		if old != nil {
 			old.ws = old.ws.NotOptimistic()
@@ -276,31 +273,36 @@ func (ph *ProtocolHandler) onTick(n int) {
 	}
 
 	// Run piece picking algorithm
-	pp := PickPieces(ph.peers, ph.pieceMap, ph.requestTimer)
+	pp := PickPieces(peers, pieceMap, requestTimer)
 	for p, blocks := range pp {
 		for _, msg := range blocks {
 			// Send, mark as requested & add to pending map
 			p.Add(msg)
-			ph.pieceMap.SetBlock(msg.index, msg.begin, REQUESTED)
-			p.blocks.Add(toOffset(msg.index, msg.begin, ph.pieceMap.pieceSize))
+			pieceMap.SetBlock(msg.index, msg.begin, REQUESTED)
+			p.blocks.Add(toOffset(msg.index, msg.begin, pieceMap.pieceSize))
 		}
 	}
 }
 
 
-func (ph *ProtocolHandler) maybeConnect(r chan<- PeerConnectResult) {
+func maybeConnect(r chan<- PeerConnectResult) {
 
-	peerCount := len(ph.peers)
-	if peerCount < idealPeers {
-		// TODO: fix me!
-	}
+//	peerCount := len(ph.peers)
+//	if peerCount < idealPeers {
+//		// TODO: fix me!
+//	}
 }
 
-func (ph *ProtocolHandler) findPeer(id *PeerIdentity) *Peer {
-	for _, p := range ph.peers {
+func findPeer(id *PeerIdentity, peers []*Peer) *Peer {
+	for _, p := range peers {
 		if p.Id().Equals(id) {
 			return p
 		}
 	}
+	return nil
+}
+
+func startTracker() <-chan *TrackerResponse {
+	// TODO: Implement stoppable goroutine for querying tracker
 	return nil
 }
