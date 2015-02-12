@@ -68,7 +68,7 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) (*Peer, *Peer
 				n++
 			}
 			if old != new {
-				append(unchokes, new)
+				unchokes = append(unchokes, new)
 			}
 		}
 	}
