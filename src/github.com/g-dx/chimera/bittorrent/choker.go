@@ -63,8 +63,13 @@ func ChokePeers(isSeed bool, peers []*Peer, changeOptimistic bool) (*Peer, *Peer
 	n := 0
 	if changeOptimistic {
 		old, new = chooseOptimistic(peers)
-		if new != nil && new.State().IsInterested() {
-			n++
+		if new != nil {
+			if new.State().IsInterested() {
+				n++
+			}
+			if old != new {
+				append(unchokes, new)
+			}
 		}
 	}
 
