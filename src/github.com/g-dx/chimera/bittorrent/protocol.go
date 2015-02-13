@@ -3,8 +3,8 @@ package bittorrent
 import (
 	"fmt"
 	"log"
-	"os"
 	"time"
+	"io"
 )
 
 var (
@@ -24,78 +24,107 @@ type PeerConnectResult struct {
 	ok   bool
 }
 
-func StartProtocol(mi *MetaInfo, dir string) (error, chan struct{}, chan struct{}) {
+// Various I/O channels for the protocol
+type ProtocolIO struct {
+	pNew   chan *Peer
+	pMsgs  chan *MessageList
+	pErrs  chan PeerError
+	pConns chan *PeerConnection
+
+	dIn  chan DiskMessage
+	dOut chan DiskMessageResult
+
+	trOut chan *TrackerResponse
+
+	tick <-chan time.Time
+
+	complete chan struct{}
+}
+
+func NewProtocolIO(c ProtocolConfig) ProtocolIO {
+	return ProtocolIO{
+		make(chan *Peer),
+		make(chan *MessageList, 100), // TODO: add to config
+		make(chan PeerError),
+		make(chan *PeerConnection),
+		make(chan DiskMessage),
+		make(chan DiskMessageResult),
+		make(chan *TrackerResponse),
+		time.After(oneSecond), // TODO: add to config
+		make(chan struct{}),
+	}
+}
+
+// TODO: Create struct for capturing configuration
+// - logger
+// - channel sizes
+// - choker function
+// - picker function
+// - heartbeat frequency
+type ProtocolConfig struct {
+	w func(name string) (error, io.Writer)
+	mi *MetaInfo
+	downloadDir string
+	listenAddr string
+}
+
+func StartProtocol(c ProtocolConfig) error {
 
 	// Create log file & create loggers
-	f, err := os.Create(fmt.Sprintf("%v/protocol.log", dir))
+	err, f := c.w("protocol.log")
 	if err != nil {
-		return err, nil, nil
+		return err
 	}
 	logger := log.New(f, "", log.Ldate|log.Ltime)
 
 	// Create disk files
-	files, err := CreateOrRead(mi.Files, fmt.Sprintf("%v/files", dir))
+	files, err := CreateOrRead(c.mi.Files, c.downloadDir)
 	if err != nil {
-		return err, nil, nil
+		return err
 	}
+
+	io := NewProtocolIO(c)
 
 	// Create disk
 	ops := make(chan DiskMessageResult)
-	layout := NewDiskLayout(files, mi.PieceLength, mi.TotalLength())
-	cacheio := NewCacheIO(layout, mi.Hashes, _16KB, ops, NewDiskIO(layout, logger))
-	disk := NewDisk(cacheio, ops)
+	layout := NewDiskLayout(files, c.mi.PieceLength, c.mi.TotalLength())
+	cacheio := NewCacheIO(layout, c.mi.Hashes, _16KB, ops, NewDiskIO(layout, logger))
+	_ = NewDisk(cacheio, ops)
 
 	// Create piece map
-	pieceMap := NewPieceMap(len(mi.Hashes), int(mi.PieceLength), mi.TotalLength())
-
-	// Channels to notify callers
-	done := make(chan struct{})
-	stop := make(chan struct{})
+	pieceMap := NewPieceMap(len(c.mi.Hashes), int(c.mi.PieceLength), c.mi.TotalLength())
 
 	// Start connection listener
-	cl, err := NewConnectionListener(make(chan *PeerConnection), "localhost:60001") // TODO: Externalise
+	_, err = NewConnectionListener(io.pConns, c.listenAddr)
 	if err != nil {
-		return err, nil, nil
+		return err
 	}
 
 	// Start loop & return
-	go protocolLoop(dir, pieceMap, disk, ops)
-	return err, done, stop
+	go protocolLoop(c, pieceMap, io, logger)
+	return err
 }
 
-// TODO: Probably replace many of these vars with a ProtocolConfiguration struct containing:
-// - logger
-// - channel sizes
-// - output dir
-// - choker function
-// - picker function
-// - tracker query interval
-// - port to listen on
-func protocolLoop(dir string, pieceMap *PieceMap, d *Disk, diskOps chan DiskMessageResult, logger *log.Logger, listener *ConnectionListener) {
+func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *log.Logger) {
 
 	peers := make([]*Peer, 0, idealPeers)
-	newPeers := make(chan *Peer)
-	peerMsgs := make(chan *MessageList, 100)
-	peerErrors := make(chan PeerError)
 	isSeed := pieceMap.IsComplete()
 	tick := 0
-
-	trackerResponses := startTracker() // TODO: require tracker URLs from metainfo
 
 	for {
 
 		select {
-		case <-time.After(oneSecond):
+		case <-io.tick:
 			onTick(tick, peers, pieceMap, isSeed)
 			tick++
 
-		case r := <-trackerResponses:
+		case r := <-io.trOut:
 			addrs := onTrackerResponse(r, len(peers))
 			for _, pa := range addrs {
-				go handlePeerConnect(pa, dir, logger, peerMsgs, peerErrors, newPeers, len(pieceMap.pieces))
+				go handlePeerConnect(pa, c, logger, io)
 			}
 
-		case list := <-peerMsgs:
+		case list := <-io.pMsgs:
 			p := findPeer(list.id, peers)
 			if p != nil {
 				// Process all messages
@@ -110,7 +139,7 @@ func protocolLoop(dir string, pieceMap *PieceMap, d *Disk, diskOps chan DiskMess
 				}
 				// Send to disk
 				for _, msg := range disk {
-					disk.in <- msg
+					io.dIn <- msg
 				}
 				// Return blocks to piecemap
 				for _, _ = range blocks {
@@ -118,28 +147,28 @@ func protocolLoop(dir string, pieceMap *PieceMap, d *Disk, diskOps chan DiskMess
 				}
 			}
 
-		case e := <-peerErrors:
+		case e := <-io.pErrs:
 			p := findPeer(e.id, peers)
 			if p != nil {
 				closePeer(p, e.err)
 			}
 
-		case p := <-newPeers:
+		case p := <-io.pNew:
 			peers = append(peers, p)
 
-		case d := <-diskOps:
-			onDisk(d, peers, logger, pieceMap, done)
+		case d := <-io.dOut:
+			onDisk(d, peers, logger, pieceMap, io.complete)
 
-		case c := <-listener.conns:
+		case conn := <-io.pConns:
 			if len(peers) < idealPeers {
-				go handlePeerEstablish(c, dir, logger, peerMsgs, peerErrors, newPeers, len(pieceMap.pieces), false)
+				go handlePeerEstablish(conn, c, logger, io, false)
 			}
 		}
 	}
 }
 
 // TODO: This function should be broken down into onWriteOk(...), onReadOk(...) and the switch on type moved to the main loop
-func onDisk(op DiskMessageResult, peers []*Peer, logger *log.Logger, pieceMap *PieceMap, done chan struct{}) {
+func onDisk(op DiskMessageResult, peers []*Peer, logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
 	switch r := op.(type) {
 	case ReadOk:
 		p := findPeer(r.id, peers)
@@ -162,7 +191,7 @@ func onDisk(op DiskMessageResult, peers []*Peer, logger *log.Logger, pieceMap *P
 
 		// Are we complete?
 		if pieceMap.IsComplete() {
-			close(done) // Yay!
+			close(complete) // Yay!
 		}
 	case HashFailed:
 		// Reset piece
@@ -188,25 +217,22 @@ func onTrackerResponse(r *TrackerResponse, peerCount int) []PeerAddress {
 	return addrs
 }
 
-func handlePeerConnect(addr PeerAddress, dir string, logger *log.Logger, peerMsgs chan *MessageList,
-	peerErrors chan<-PeerError, newPeers chan *Peer, noOfPieces int) {
+func handlePeerConnect(addr PeerAddress, c ProtocolConfig, logger *log.Logger, io ProtocolIO) {
 
 	conn, err := NewConnection(addr.GetIpAndPort())
 	if err != nil {
 		logger.Printf("Can't connect to [%v]: %v\n", addr, err)
 		return
 	}
-	handlePeerEstablish(conn, dir, logger, peerMsgs, peerErrors, newPeers, noOfPieces, true)
+	handlePeerEstablish(conn, c, logger, io, true)
 }
 
-func handlePeerEstablish(conn *PeerConnection, dir string, logger *log.Logger, peerMsgs chan *MessageList,
-	peerErrors chan<-PeerError, newPeers chan *Peer, noOfPieces int, outgoing bool) {
+func handlePeerEstablish(conn *PeerConnection, c ProtocolConfig, logger *log.Logger, io ProtocolIO, outgoing bool) {
 
 	// Create log file & create loggers
-	path := fmt.Sprintf("%v/%v.log", dir, conn.in.conn.RemoteAddr())
-	file, err := os.Create(path)
+	err, file := c.w(fmt.Sprintf("%v.log", conn.in.conn.RemoteAddr()))
 	if err != nil {
-		logger.Printf("Can't create log file [%v]\n", path)
+		logger.Printf("Can't create log file: [%v]\n", err)
 		conn.Close()
 		return
 	}
@@ -214,22 +240,24 @@ func handlePeerEstablish(conn *PeerConnection, dir string, logger *log.Logger, p
 	out := make(chan ProtocolMessage)
 
 	// Attempt to establish connection
-	id, err := conn.Establish(out, peerMsgs, peerErrors, Handshake(ph.metaInfo.InfoHash), file, outgoing)
+	id, err := conn.Establish(out, io.pMsgs, io.pErrs, Handshake(c.mi.InfoHash), file, outgoing)
 	if err != nil {
-		logger.Printf("Can't establish connection [%v]: %v\n", addr, err)
+		logger.Printf("Can't establish connection [%v]: %v\n", conn.in.conn.RemoteAddr(), err)
 		conn.Close()
 		return
 	}
+//
+//	// Setup request handling
+//	ph.requestTimer.CreateTimer(*id)
+//	f := func(index, begin int) {
+//		ph.requestTimer.AddBlock(*id, index, begin)
+//	}
 
-	// Setup request handling
-	ph.requestTimer.CreateTimer(*id)
-	f := func(index, begin int) {
-		ph.requestTimer.AddBlock(*id, index, begin)
-	}
+	f := func(a, b int) {}
 
 	// Connected
 	logger.Printf("New Peer: %v\n", id)
-	newPeers <- NewPeer(id, NewQueue(out, f), noOfPieces, logger)
+	io.pNew <- NewPeer(id, NewQueue(out, f), len(c.mi.Hashes), logger)
 }
 
 func closePeer(peer *Peer, err error) {
@@ -273,7 +301,7 @@ func onTick(n int, peers []*Peer, pieceMap *PieceMap, isSeed bool) {
 	}
 
 	// Run piece picking algorithm
-	pp := PickPieces(peers, pieceMap, requestTimer)
+	pp := PickPieces(peers, pieceMap)
 	for p, blocks := range pp {
 		for _, msg := range blocks {
 			// Send, mark as requested & add to pending map
@@ -299,10 +327,5 @@ func findPeer(id *PeerIdentity, peers []*Peer) *Peer {
 			return p
 		}
 	}
-	return nil
-}
-
-func startTracker() <-chan *TrackerResponse {
-	// TODO: Implement stoppable goroutine for querying tracker
 	return nil
 }

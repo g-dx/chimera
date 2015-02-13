@@ -52,15 +52,8 @@ func TestPickPieces(t *testing.T) {
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
 	defer teardown(peers)
 
-	// Build a request timer
-	pt := &ProtocolRequestTimer{timers : make(map[PeerIdentity]*RequestTimer),
-		                        onReturn : func(int, int) {}}
-	for _, p := range peers {
-		pt.CreateTimer(*p.Id())
-	}
-
 	// Pick pieces
-	picked := PickPieces(peers, pm, pt)
+	picked := PickPieces(peers, pm)
 
 	testData := map[*TestPeer][]ProtocolMessage {
 		 p1: []ProtocolMessage{},
@@ -71,7 +64,6 @@ func TestPickPieces(t *testing.T) {
 		 p8: []ProtocolMessage{},
 		 p9: []ProtocolMessage{},
 		 p10: []ProtocolMessage{
-			 Interested{},
 			 Request{0, 0, _16KB},
 			 Request{0, 1 * _16KB, _16KB},
 			 Request{0, 2 * _16KB, _16KB},
@@ -84,7 +76,6 @@ func TestPickPieces(t *testing.T) {
 			 Request{0, 9 * _16KB, _16KB},
 		 },
 		p4: []ProtocolMessage{
-			Interested{},
 			Request{1, 0, _16KB},
 			Request{1, 1 * _16KB, _16KB},
 			Request{1, 2 * _16KB, _16KB},
@@ -97,7 +88,6 @@ func TestPickPieces(t *testing.T) {
 			Request{1, 9 * _16KB, _16KB},
 		},
 		p2: []ProtocolMessage{
-			Interested{},
 			Request{2, 0, _16KB},
 			Request{2, 1 * _16KB, _16KB},
 			Request{2, 2 * _16KB, _16KB},
@@ -115,14 +105,12 @@ func TestPickPieces(t *testing.T) {
 
 	for p, actualMsgs := range picked {
 		expectedMsgs := getExpected(p, testData)
-			for _, expectedMsg := range expectedMsgs {
-				for _, actualMsg := range actualMsgs {
-					actual := ToString(actualMsg)
-					expected := ToString(expectedMsg)
-					if actual != expected {
-						t.Errorf("\nPeer: %v\nExpected: %v\nActual  : %v",
-							p.Id(), expected, actual)
-					}
+			for i, actualMsg := range actualMsgs {
+				actual := ToString(actualMsg)
+				expected := ToString(expectedMsgs[i])
+				if actual != expected {
+					t.Errorf("\nPeer: %v\nExpected: %v\nActual  : %v",
+						p.Id(), expected, actual)
 				}
 			}
 	}

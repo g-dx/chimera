@@ -55,8 +55,7 @@ func (p Peer) Stats() *Statistics {
 }
 
 func (p *Peer) QueuedRequests() int {
-//	return p.queue.QueuedRequests()
-	return 0 // TODO: Fix me
+	return len(p.blocks)
 }
 
 func (p *Peer) Choke() {

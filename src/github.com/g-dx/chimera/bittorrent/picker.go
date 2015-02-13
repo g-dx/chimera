@@ -26,7 +26,7 @@ func (b ByPriority) Len() int           { return len(b) }
 func (b ByPriority) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
 func (b ByPriority) Less(i, j int) bool { return b[i].Priority() < b[j].Priority() }
 
-func PickPieces(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequestTimer) map[*Peer][]Request {
+func PickPieces(peers []*Peer, pieceMap *PieceMap) map[*Peer][]Request {
 
 	// Sort into fastest downloaders
 	sortedPeers := make([]*Peer, len(peers))
@@ -39,11 +39,11 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap, requestTimer *ProtocolRequest
 	complete := make(set) // The pieces whose block have are all requested or taken
 	picked := make(map[*Peer][]Request) // The blocks picked for each peer
 
-	for _, peer := range peers {
+	for _, peer := range sortedPeers {
 		if peer.State().CanDownload() {
 
 			// Find total required
-			n := peer.QueuedRequests() + requestTimer.BlocksWaiting(*peer.Id())
+			n := 10 - peer.QueuedRequests() // TODO: Make configurable
 
 			reqs := make([]Request, 0, n)
 			for _, p := range availablePieces(complete, pieceMap, peer.bitfield, n) {
