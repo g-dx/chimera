@@ -16,7 +16,7 @@ type CloseMessage struct{}
 
 // Creates a new buffer of the given size. Returns a channel to control
 // the buffer & a downstream channel.
-func Buffer(size int) (chan<- BufferMessage, <-chan ProtocolMessage) {
+func Buffer(size int) (chan<- BufferMessage, chan ProtocolMessage) {
 	in := make(chan BufferMessage, size)
 	out := make(chan ProtocolMessage)
 	go bufferImpl(in, out)

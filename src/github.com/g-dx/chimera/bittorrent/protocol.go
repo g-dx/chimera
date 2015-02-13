@@ -26,7 +26,7 @@ type PeerConnectResult struct {
 
 // Various I/O channels for the protocol
 type ProtocolIO struct {
-	pNew   chan *Peer
+	pNew   chan PeerWrapper
 	pMsgs  chan *MessageList
 	pErrs  chan PeerError
 	pConns chan *PeerConnection
@@ -39,8 +39,8 @@ type ProtocolIO struct {
 
 func NewProtocolIO(c ProtocolConfig) ProtocolIO {
 	return ProtocolIO{
-		make(chan *Peer),
-		make(chan *MessageList, 100), // TODO: add to config
+		make(chan PeerWrapper),
+		make(chan *MessageList, c.peersIncomingBufferSize),
 		make(chan PeerError),
 		make(chan *PeerConnection),
 		make(chan DiskMessage),
@@ -62,6 +62,13 @@ type ProtocolConfig struct {
 	mi *MetaInfo
 	downloadDir string
 	listenAddr string
+	peerOutgoingBufferSize int
+	peersIncomingBufferSize int
+}
+
+type PeerWrapper struct {
+	p *Peer
+	in chan<-BufferMessage
 }
 
 func StartProtocol(c ProtocolConfig) error {
@@ -185,8 +192,9 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 				closePeer(p, e.err)
 			}
 
-		case p := <-io.pNew:
-			peers = append(peers, p)
+		case wrapper := <-io.pNew:
+			peers = append(peers, wrapper.p)
+			buffers[wrapper.p.Id()] = wrapper.in
 
 		case d := <-io.dOut:
 			onDisk(d, peers, buffers, logger, pieceMap, io.complete)
@@ -269,7 +277,7 @@ func handlePeerEstablish(conn *PeerConnection, c ProtocolConfig, logger *log.Log
 		return
 	}
 
-	out := make(chan ProtocolMessage)
+	in, out := Buffer(c.peerOutgoingBufferSize)
 
 	// Attempt to establish connection
 	id, err := conn.Establish(out, io.pMsgs, io.pErrs, Handshake(c.mi.InfoHash), file, outgoing)
@@ -281,7 +289,7 @@ func handlePeerEstablish(conn *PeerConnection, c ProtocolConfig, logger *log.Log
 
 	// Connected
 	logger.Printf("New Peer: %v\n", id)
-	io.pNew <- NewPeer(id, len(c.mi.Hashes), logger)
+	io.pNew <- PeerWrapper{NewPeer(id, len(c.mi.Hashes), logger), in}
 }
 
 func closePeer(peer *Peer, err error) {
