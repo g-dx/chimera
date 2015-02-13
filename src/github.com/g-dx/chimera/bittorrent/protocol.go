@@ -98,6 +98,8 @@ func StartProtocol(c ProtocolConfig) error {
 	pieceMap := NewPieceMap(len(c.mi.Hashes), int(c.mi.PieceLength), c.mi.TotalLength())
 
 	// Start connection listener
+	// TODO: Decide what to do here. We could wrap in a ProtocolControl struct which has
+	// stop, progress, etc methods on it and return from this method?
 	_, err = NewConnectionListener(io.pConns, c.listenAddr)
 	if err != nil {
 		return err
@@ -289,7 +291,7 @@ func handlePeerEstablish(conn *PeerConnection, c ProtocolConfig, logger *log.Log
 
 	// Connected
 	logger.Printf("New Peer: %v\n", id)
-	io.pNew <- PeerWrapper{NewPeer(id, len(c.mi.Hashes), logger), in}
+	io.pNew <- PeerWrapper{NewPeer(id, len(c.mi.Hashes)), in}
 }
 
 func closePeer(peer *Peer, err error) {

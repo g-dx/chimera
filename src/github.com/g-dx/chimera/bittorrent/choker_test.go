@@ -2,10 +2,8 @@ package bittorrent
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"testing"
-	"os"
 	"runtime"
 )
 
@@ -361,7 +359,7 @@ func pr(i int) *TestPeer {
 
 func per(i int, pm *PieceMap) *TestPeer {
 	out := make(chan ProtocolMessage)
-	p := NewPeer(PeerIdentity(strconv.Itoa(i)), len(pm.pieces), log.New(os.Stdout, "", log.LstdFlags))
+	p := NewPeer(PeerIdentity(strconv.Itoa(i)), len(pm.pieces))
 	return &TestPeer{p, out}
 }
 

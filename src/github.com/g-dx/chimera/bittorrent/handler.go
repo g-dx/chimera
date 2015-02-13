@@ -54,7 +54,7 @@ func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []
 		case Block: err, op = onBlock(m.index, m.begin, m.block, p.statistics, p.id)
 		case KeepAlive: // Nothing to do...
 		default:
-			p.logger.Printf("Unknown protocol message: %v", m)
+			//p.logger.Printf("Unknown protocol message: %v", m) TODO: pass a logger
 		}
 
 		// Check for error & bail

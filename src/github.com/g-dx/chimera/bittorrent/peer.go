@@ -1,9 +1,5 @@
 package bittorrent
 
-import (
-	"log"
-)
-
 // ----------------------------------------------------------------------------------
 // BlockOffset - the offset of a particular block in the torrent
 // ----------------------------------------------------------------------------------
@@ -21,17 +17,15 @@ type Peer struct {
 	bitfield   *BitSet
 	id         PeerIdentity
 	statistics *Statistics
-	logger     *log.Logger
 	blocks 	   set
 }
 
-func NewPeer(id PeerIdentity, noOfPieces int, logger *log.Logger) *Peer {
+func NewPeer(id PeerIdentity, noOfPieces int) *Peer {
 
 	return &Peer{
 		id:         id,
 		ws:         initWireState,
 		bitfield:   NewBitSet(noOfPieces),
-		logger:     logger,
 		statistics: NewStatistics(),
 		blocks: make(set),
 	}
