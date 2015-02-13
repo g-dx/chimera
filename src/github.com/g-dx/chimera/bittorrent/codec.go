@@ -47,10 +47,10 @@ const (
 
 type MessageList struct {
 	msgs []ProtocolMessage
-	id   *PeerIdentity
+	id   PeerIdentity
 }
 
-func NewMessageList(id *PeerIdentity, msgs ...ProtocolMessage) *MessageList {
+func NewMessageList(id PeerIdentity, msgs ...ProtocolMessage) *MessageList {
 	return &MessageList{msgs, id}
 }
 

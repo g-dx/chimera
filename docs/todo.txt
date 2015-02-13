@@ -1,13 +1,6 @@
 TODO:
 =========
 
-+ Protocol Refactor
-=================
-Should be changed to work like Buffer, that is no struct - simply a function which receive everything it needs to do
-its job. The loop function should probably look something like this:
-
-func protocolLoop(disk chan<-DiskMessage, res <-chan DiskResultMessage, p *pieceMap) (details <-chan Details, done <-chan struct{}, stop chan<-struct{})
-
 + Picker Refactor
 =================
 Picker does the work of calculating block offsets and then discards them only to recalculate them again
@@ -39,25 +32,6 @@ func toOffset(index, begin int) BlockOffset {
     return uint64(index) * pieceSize + uint64(begin)
     // do bitshifting?
 }
-
-
-+ Simplify PeerIdentity
-=======================
-Currently this is a pointer to a struct. Really we want an opaque value. We can change this to be:
-
-type PeerIdentity string
-
-Which is immutable and can be passed around by value as a string is a glorified slice.
-TODO: We need to check if this does indeed result only copying a pointer? -
-DONE: Checked on go playground. Regardless of string size passing to a function always results in
-an 8 byte copy being passed. This feels correct as strings are really:
-
-type string struct {
-    b []byte
-    len int
-}
-
-With no way to alter the underlying slice.
 
 + Update peer storage to use map
 ================================

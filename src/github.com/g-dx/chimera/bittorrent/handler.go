@@ -136,7 +136,7 @@ func onRequest(index, begin, length int) (error, DiskMessage) {
 	return nil, nil
 }
 
-func onBlock(index, begin int, block []byte, s *Statistics, id *PeerIdentity) (error, DiskMessage) {
+func onBlock(index, begin int, block []byte, s *Statistics, id PeerIdentity) (error, DiskMessage) {
 	// NOTE: Already on the way to disk...
 	// p.disk.Write(index, begin, length, p.id)
 	//	p.disk.Write(index, begin, block)

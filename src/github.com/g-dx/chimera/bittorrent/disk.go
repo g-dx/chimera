@@ -28,7 +28,7 @@ type DiskMessage interface {
 
 type WriteMessage Block
 type ReadMessage struct {
-	id    *PeerIdentity
+	id    PeerIdentity
 	block Block
 }
 // TODO: Implement Cancel
@@ -50,7 +50,7 @@ type PieceOk int
 type HashFailed int
 
 type ReadOk struct {
-	id    *PeerIdentity
+	id    PeerIdentity
 	block Block
 }
 
@@ -118,7 +118,7 @@ func (d * Disk) loop() {
 	}
 }
 
-func (d * Disk) Read(id *PeerIdentity, block Block) {
+func (d * Disk) Read(id PeerIdentity, block Block) {
 	d.in <- ReadMessage{id, block}
 }
 

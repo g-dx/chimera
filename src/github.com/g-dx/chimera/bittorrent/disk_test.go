@@ -168,7 +168,7 @@ func TestDisk(t *testing.T) {
 	diskOps := make(chan DiskMessageResult, 1)
 	disk := NewDisk(&NullIO{}, diskOps)
 	defer disk.Close()
-	id := &PeerIdentity{[20]byte{}, "id"}
+	id := PeerIdentity("id")
 
 	// Test a read
 

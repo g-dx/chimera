@@ -118,7 +118,7 @@ func TestPickPieces(t *testing.T) {
 
 func getExpected(p *Peer, testData map[*TestPeer][]ProtocolMessage) []ProtocolMessage {
 	for key, value := range testData {
-		if key.Peer.Id().Equals(p.Id()) {
+		if key.Peer.Id() == p.Id() {
 			return value
 		}
 	}

@@ -19,13 +19,13 @@ func blockOffset(index, begin, pieceSize int) int64 {
 type Peer struct {
 	ws         WireState
 	bitfield   *BitSet
-	id         *PeerIdentity
+	id         PeerIdentity
 	statistics *Statistics
 	logger     *log.Logger
 	blocks 	   set
 }
 
-func NewPeer(id *PeerIdentity, noOfPieces int, logger *log.Logger) *Peer {
+func NewPeer(id PeerIdentity, noOfPieces int, logger *log.Logger) *Peer {
 
 	return &Peer{
 		id:         id,
@@ -41,7 +41,7 @@ func (p *Peer) State() WireState {
 	return p.ws
 }
 
-func (p *Peer) Id() *PeerIdentity {
+func (p *Peer) Id() PeerIdentity {
 	return p.id
 }
 

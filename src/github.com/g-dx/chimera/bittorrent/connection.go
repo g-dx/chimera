@@ -33,14 +33,14 @@ var (
 
 type PeerError struct {
 	err error
-	id  *PeerIdentity
+	id  PeerIdentity
 }
 
 func (pe *PeerError) Error() error {
 	return pe.err
 }
 
-func (pe *PeerError) Id() *PeerIdentity {
+func (pe *PeerError) Id() PeerIdentity {
 	return pe.id
 }
 
@@ -48,18 +48,8 @@ func (pe *PeerError) Id() *PeerIdentity {
 // PeerIdentity - represents a unique name for a connection to a peer
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-type PeerIdentity struct {
-	id      [20]byte // from handshake
-	address string   // ip:port
-}
-
-func (pi *PeerIdentity) Equals(ip *PeerIdentity) bool {
-	return pi.id == ip.id && pi.address == ip.address
-}
-
-func (pi *PeerIdentity) String() string {
-	return pi.address
-}
+type PeerIdentity string
+const nilPeerId = PeerIdentity("")
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 // PeerConnection - represents a read+write connection to a peer
@@ -102,7 +92,7 @@ func (pc *PeerConnection) Establish(in chan ProtocolMessage,
 	e chan<- PeerError,
 	handshake *HandshakeMessage,
 	w io.Writer,
-	outgoing bool) (*PeerIdentity, error) {
+	outgoing bool) (PeerIdentity, error) {
 
 	pc.in.log = log.New(w, " in  ->", log.Ldate|log.Ltime)
 	pc.out.logger = log.New(w, " out <-"+pc.in.conn.RemoteAddr().String()+" => ", log.Ldate|log.Ltime|log.Lmicroseconds)
@@ -112,7 +102,7 @@ func (pc *PeerConnection) Establish(in chan ProtocolMessage,
 	id, err := pc.completeHandshake(handshake, outgoing)
 	if err != nil {
 		pc.logger.Println(err)
-		return nil, err
+		return nilPeerId, err
 	}
 
 	// Connect up channels
@@ -132,32 +122,31 @@ func (pc *PeerConnection) Establish(in chan ProtocolMessage,
 	return id, nil
 }
 
-func (pc *PeerConnection) completeHandshake(handshake *HandshakeMessage, outgoing bool) (pi *PeerIdentity, err error) {
+func (pc *PeerConnection) completeHandshake(handshake *HandshakeMessage, outgoing bool) (pi PeerIdentity, err error) {
 
 	var inHandshake *HandshakeMessage
 	if outgoing {
 		WriteHandshake(pc.out.conn, handshake)
 		inHandshake, err = pc.readHandshake()
 		if err != nil {
-			return nil, err
+			return nilPeerId, err
 		}
 	} else {
 		inHandshake, err = pc.readHandshake()
 		if err != nil {
-			return nil, err
+			return nilPeerId, err
 		}
 		WriteHandshake(pc.out.conn, handshake)
 	}
 
 	// Assert hashes
 	if !bytes.Equal(handshake.infoHash, inHandshake.infoHash) {
-		return nil, errHashesNotEquals
+		return nilPeerId, errHashesNotEquals
 	}
 
 	// Create ID
-	id := &PeerIdentity{address: pc.in.conn.RemoteAddr().String()}
-	copy(id.id[:], inHandshake.infoHash)
-	return id, nil
+	id := fmt.Sprintf("%v:%x", pc.in.conn.RemoteAddr().String(), inHandshake.infoHash)
+	return PeerIdentity(id), nil
 }
 
 func (pc *PeerConnection) readHandshake() (in *HandshakeMessage, err error) {
@@ -213,7 +202,7 @@ type IncomingPeerConnection struct {
 	log  *log.Logger
 }
 
-func (ic *IncomingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, id *PeerIdentity) {
+func (ic *IncomingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, id PeerIdentity) {
 	defer onLoopExit(err, id)
 
 	keepAlive := time.NewTimer(keepAlivePeriod)
@@ -263,7 +252,7 @@ type OutgoingPeerConnection struct {
 	logger *log.Logger
 }
 
-func (oc *OutgoingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, id *PeerIdentity) {
+func (oc *OutgoingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, id PeerIdentity) {
 	defer onLoopExit(err, id)
 	keepAlive := time.After(keepAlivePeriod)
 	flushTimer := time.Tick(FIVE_HUNDRED_MILLIS)
@@ -305,7 +294,7 @@ func (oc *OutgoingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, 
 	oc.logger.Println("Loop exit")
 }
 
-func onLoopExit(c chan<- PeerError, id *PeerIdentity) {
+func onLoopExit(c chan<- PeerError, id PeerIdentity) {
 	if r := recover(); r != nil {
 		if _, ok := r.(runtime.Error); ok {
 			panic(r)

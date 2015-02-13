@@ -103,7 +103,7 @@ func StartProtocol(c ProtocolConfig) error {
 
 func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *log.Logger) {
 
-	buffers := make(map[*PeerIdentity]chan<-BufferMessage)
+	buffers := make(map[PeerIdentity]chan<-BufferMessage)
 	peers := make([]*Peer, 0, idealPeers)
 	isSeed := pieceMap.IsComplete()
 	tick := 0
@@ -200,7 +200,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 }
 
 // TODO: This function should be broken down into onWriteOk(...), onReadOk(...) and the switch on type moved to the main loop
-func onDisk(op DiskMessageResult, peers []*Peer, buffers map[*PeerIdentity]chan<-BufferMessage, logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
+func onDisk(op DiskMessageResult, peers []*Peer, buffers map[PeerIdentity]chan<-BufferMessage, logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
 	switch r := op.(type) {
 	case ReadOk:
 		p := findPeer(r.id, peers)
@@ -301,9 +301,9 @@ func maybeConnect(r chan<- PeerConnectResult) {
 //	}
 }
 
-func findPeer(id *PeerIdentity, peers []*Peer) *Peer {
+func findPeer(id PeerIdentity, peers []*Peer) *Peer {
 	for _, p := range peers {
-		if p.Id().Equals(id) {
+		if p.Id() == id {
 			return p
 		}
 	}

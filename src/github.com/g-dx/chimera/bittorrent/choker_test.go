@@ -51,10 +51,10 @@ func TestBuildCandidatesGivenNewPeers(t *testing.T) {
 
 	c, cur = buildCandidates(peers)
 	intEquals(t, 3, len(c))
-	stringEquals(t, p1.Id().String(), cur.Id().String())
-	stringEquals(t, p2.Id().String(), c[0].Id().String())
-	stringEquals(t, p2.Id().String(), c[1].Id().String())
-	stringEquals(t, p2.Id().String(), c[2].Id().String())
+	anyEquals(t, p1.Id(), cur.Id())
+	anyEquals(t, p2.Id(), c[0].Id())
+	anyEquals(t, p2.Id(), c[1].Id())
+	anyEquals(t, p2.Id(), c[2].Id())
 
 	// Clear
 	// TODO: This isn't great
@@ -88,7 +88,7 @@ func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T
 
 	containsPeers(t, unchokes) // p1 already unchoked
 	containsPeers(t, chokes, p2)
-	if !old.Id().Equals(new.Id()) {
+	if old.Id() != new.Id() {
 		t.Errorf("Expected: %v, Actual: %v", old.Id(), new.Id())
 	}
 }
@@ -230,7 +230,7 @@ func TestChokePeersGivenDifferentSpeedsWhenSpeedChanges(t *testing.T) {
 func toList(ps []*Peer) string {
 	var s string
 	for _, p := range ps {
-		s += p.Id().String()
+		s += string(p.Id())
 		s += ", "
 	}
 	return s
@@ -251,7 +251,7 @@ func containsPeers(t *testing.T, expected []*Peer, actual ...*TestPeer)  {
 	for _, p1 := range actual {
 		var found bool
 		for _, p2 := range expected {
-			if p1.Peer.Id().Equals(p2.Id()) {
+			if p1.Peer.Id() == p2.Id() {
 				found = true
 				break
 			}
@@ -266,7 +266,7 @@ func containsPeers(t *testing.T, expected []*Peer, actual ...*TestPeer)  {
 	for _, p1 := range expected {
 		var found bool
 		for _, p2 := range actual {
-			if p1.Id().Equals(p2.Peer.Id()) {
+			if p1.Id() == p2.Peer.Id() {
 				found = true
 				break
 			}
@@ -361,10 +361,7 @@ func pr(i int) *TestPeer {
 
 func per(i int, pm *PieceMap) *TestPeer {
 	out := make(chan ProtocolMessage)
-	p := NewPeer(
-		&PeerIdentity{[20]byte{}, strconv.Itoa(i)},
-		len(pm.pieces),
-		log.New(os.Stdout, "", log.LstdFlags))
+	p := NewPeer(PeerIdentity(strconv.Itoa(i)), len(pm.pieces), log.New(os.Stdout, "", log.LstdFlags))
 	return &TestPeer{p, out}
 }
 

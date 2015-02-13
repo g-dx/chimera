@@ -45,6 +45,12 @@ func TestNewMetaInfo(t *testing.T) {
 		metaInfo.InfoHash)
 }
 
+func anyEquals(t *testing.T, a, b interface {}) {
+	if a != b {
+		unequalValue(t, a, b)
+	}
+}
+
 func byteEquals(t *testing.T, a, b []byte) {
 	if ok := bytes.Equal(a, b); !ok {
 		unequalValue(t, a, b)
