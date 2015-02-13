@@ -10,7 +10,7 @@ piecemap to return the length for a given offset.
 + Uninterested State Sending
 ============================
 We are currently not sending uninterested to peers when they no longer have an pieces we are interested
-in.
+in. We need a way to implement fast bitset matching to know when a peer is not interesting.
 
 + Pure
 ======
