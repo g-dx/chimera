@@ -30,14 +30,10 @@ type ProtocolIO struct {
 	pMsgs  chan *MessageList
 	pErrs  chan PeerError
 	pConns chan *PeerConnection
-
 	dIn  chan DiskMessage
 	dOut chan DiskMessageResult
-
 	trOut chan *TrackerResponse
-
 	tick <-chan time.Time
-
 	complete chan struct{}
 }
 
@@ -107,6 +103,7 @@ func StartProtocol(c ProtocolConfig) error {
 
 func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *log.Logger) {
 
+	buffers := make(map[*PeerIdentity]chan<-BufferMessage)
 	peers := make([]*Peer, 0, idealPeers)
 	isSeed := pieceMap.IsComplete()
 	tick := 0
@@ -115,7 +112,42 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 
 		select {
 		case <-io.tick:
-			onTick(tick, peers, pieceMap, isSeed)
+			// Update peer stats
+			for _, p := range peers {
+				p.Stats().Update()
+			}
+
+			// Run choking algorithm
+			if tick%chokeInterval == 0 {
+				old, new, chokes, unchokes := ChokePeers(isSeed, peers, tick%optimisticChokeInterval == 0)
+				// Clear old optimistic
+				if old != nil {
+					old.ws = old.ws.NotOptimistic()
+				}
+				// Set new optimistic
+				if new != nil {
+					new.ws = new.ws.Optimistic()
+				}
+				// Send chokes
+				for _, p := range chokes {
+					buffers[p.Id()] <- Choke{}
+				}
+				// Send unchokes
+				for _, p := range unchokes {
+					buffers[p.Id()] <- Unchoke{}
+				}
+			}
+
+			// Run piece picking algorithm
+			pp := PickPieces(peers, pieceMap)
+			for p, blocks := range pp {
+				for _, msg := range blocks {
+					// Send, mark as requested & add to pending map
+					buffers[p.Id()] <- msg // TODO: Send as batch
+					pieceMap.SetBlock(msg.index, msg.begin, REQUESTED)
+					p.blocks.Add(toOffset(msg.index, msg.begin, pieceMap.pieceSize))
+				}
+			}
 			tick++
 
 		case r := <-io.trOut:
@@ -135,7 +167,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 				}
 				// Send to net
 				for _, msg := range net {
-					p.queue.Add(msg)
+					buffers[p.Id()] <- msg // TODO: Send as batch
 				}
 				// Send to disk
 				for _, msg := range disk {
@@ -157,7 +189,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 			peers = append(peers, p)
 
 		case d := <-io.dOut:
-			onDisk(d, peers, logger, pieceMap, io.complete)
+			onDisk(d, peers, buffers, logger, pieceMap, io.complete)
 
 		case conn := <-io.pConns:
 			if len(peers) < idealPeers {
@@ -168,12 +200,12 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 }
 
 // TODO: This function should be broken down into onWriteOk(...), onReadOk(...) and the switch on type moved to the main loop
-func onDisk(op DiskMessageResult, peers []*Peer, logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
+func onDisk(op DiskMessageResult, peers []*Peer, buffers map[*PeerIdentity]chan<-BufferMessage, logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
 	switch r := op.(type) {
 	case ReadOk:
 		p := findPeer(r.id, peers)
 		if p != nil {
-			p.Add(r.block)
+			buffers[p.Id()] <- r.block
 			logger.Printf("block [%v, %v] added to peer Q [%v]\n", r.block.index, r.block.begin, r.id)
 		}
 	case WriteOk:
@@ -186,7 +218,7 @@ func onDisk(op DiskMessageResult, peers []*Peer, logger *log.Logger, pieceMap *P
 
 		// Send haves
 		for _, p := range peers {
-			p.Add(Have(r))
+			buffers[p.Id()] <- Have(r)
 		}
 
 		// Are we complete?
@@ -246,18 +278,10 @@ func handlePeerEstablish(conn *PeerConnection, c ProtocolConfig, logger *log.Log
 		conn.Close()
 		return
 	}
-//
-//	// Setup request handling
-//	ph.requestTimer.CreateTimer(*id)
-//	f := func(index, begin int) {
-//		ph.requestTimer.AddBlock(*id, index, begin)
-//	}
-
-	f := func(a, b int) {}
 
 	// Connected
 	logger.Printf("New Peer: %v\n", id)
-	io.pNew <- NewPeer(id, NewQueue(out, f), len(c.mi.Hashes), logger)
+	io.pNew <- NewPeer(id, len(c.mi.Hashes), logger)
 }
 
 func closePeer(peer *Peer, err error) {
@@ -268,50 +292,6 @@ func closePeer(peer *Peer, err error) {
 	// 2. peer.Close()
 	// 3. Log errors
 }
-
-func onTick(n int, peers []*Peer, pieceMap *PieceMap, isSeed bool) {
-
-	// Check for expired requests
-//	requestTimer.Tick(n)
-
-	// Update peer stats
-	for _, p := range peers {
-		p.Stats().Update()
-	}
-
-	// Run choking algorithm
-	if n%chokeInterval == 0 {
-		old, new, chokes, unchokes := ChokePeers(isSeed, peers, n%optimisticChokeInterval == 0)
-		// Clear old optimistic
-		if old != nil {
-			old.ws = old.ws.NotOptimistic()
-		}
-		// Set new optimistic
-		if new != nil {
-			new.ws = new.ws.Optimistic()
-		}
-		// Send chokes
-		for _, p := range chokes {
-			p.Add(Choke{})
-		}
-		// Send unchokes
-		for _, p := range unchokes {
-			p.Add(Unchoke{})
-		}
-	}
-
-	// Run piece picking algorithm
-	pp := PickPieces(peers, pieceMap)
-	for p, blocks := range pp {
-		for _, msg := range blocks {
-			// Send, mark as requested & add to pending map
-			p.Add(msg)
-			pieceMap.SetBlock(msg.index, msg.begin, REQUESTED)
-			p.blocks.Add(toOffset(msg.index, msg.begin, pieceMap.pieceSize))
-		}
-	}
-}
-
 
 func maybeConnect(r chan<- PeerConnectResult) {
 

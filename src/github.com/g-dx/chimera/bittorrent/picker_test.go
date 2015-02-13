@@ -50,7 +50,7 @@ func TestPickPieces(t *testing.T) {
 	p9 := per(9, pm).dl(9).with(pm, Interested{})
 	p10 := per(10, pm).dl(10).with(pm, Bitfield([]byte{0xE0}), Unchoke{})
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
-	defer teardown(peers)
+
 
 	// Pick pieces
 	picked := PickPieces(peers, pm)

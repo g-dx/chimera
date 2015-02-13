@@ -17,7 +17,6 @@ func blockOffset(index, begin, pieceSize int) int64 {
 // ----------------------------------------------------------------------------------
 
 type Peer struct {
-	queue      *PeerQueue
 	ws         WireState
 	bitfield   *BitSet
 	id         *PeerIdentity
@@ -26,10 +25,7 @@ type Peer struct {
 	blocks 	   set
 }
 
-func NewPeer(id *PeerIdentity,
-	queue *PeerQueue,
-	noOfPieces int,
-	logger *log.Logger) *Peer {
+func NewPeer(id *PeerIdentity, noOfPieces int, logger *log.Logger) *Peer {
 
 	return &Peer{
 		id:         id,
@@ -37,7 +33,6 @@ func NewPeer(id *PeerIdentity,
 		bitfield:   NewBitSet(noOfPieces),
 		logger:     logger,
 		statistics: NewStatistics(),
-		queue:      queue,
 		blocks: make(set),
 	}
 }
@@ -77,9 +72,6 @@ func (p *Peer) ClearOptimistic() {
 	p.ws = p.ws.NotOptimistic()
 }
 
-func (p *Peer) Add(pm ProtocolMessage) {
-	p.queue.Add(pm)
-}
 
 // ----------------------------------------------------------------------------------
 // PeerStatistics

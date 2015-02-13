@@ -29,7 +29,7 @@ func BenchmarkChokePeers10(b *testing.B) {
 	p8.UnChoke(false)
 
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
-	defer teardown(peers)
+
 	for i := 0; i < b.N; i++ {
 		ChokePeers(false, peers, true)
 	}
@@ -40,7 +40,7 @@ func TestBuildCandidatesGivenNewPeers(t *testing.T) {
 	p1 := p1()
 	p2 := p2()
 	peers := asList(p1, p2)
-	defer teardown(peers)
+
 
 	c, cur := buildCandidates(peers)
 	intEquals(t, 6, len(c))
@@ -77,7 +77,7 @@ func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T
 	p1 := p1()
 	p2 := p2()
 	peers := asList(p1, p2)
-	defer teardown(peers)
+
 
 	// Set optimistic and unchoked
 	p1.UnChoke(true)
@@ -98,7 +98,7 @@ func TestChokePeersGivenNoOptimisticCandidatesAndNoOptimistic(t *testing.T) {
 	p1 := p1()
 	p2 := p2()
 	peers := asList(p1, p2)
-	defer teardown(peers)
+
 
 	// Set both unchoke
 	p1.UnChoke(false)
@@ -122,7 +122,7 @@ func TestChokePeersGivenNoInterestedPeers(t *testing.T) {
 	p2 := p2()
 	p3 := p3()
 	peers := asList(p1, p2, p3)
-	defer teardown(peers)
+
 
 	// Run choker & check all still choked
 	_, _, chokes, unchokes := ChokePeers(false, peers, false)
@@ -136,7 +136,7 @@ func TestChokePeersGivenSameSpeedPeersWhenInterestChanges(t *testing.T) {
 	p2 := p2().dl(1)
 	p3 := p3().dl(1)
 	peers := asList(p1, p2, p3)
-	defer teardown(peers)
+
 
 	// Run choker
 	_, _, chokes, unchokes := ChokePeers(false, peers, false)
@@ -171,7 +171,7 @@ func TestChokePeersGivenDifferentSpeedsWhenInterestChanges(t *testing.T) {
 	p7 := p7().dl(7).interested()
 	p8 := p8().dl(8)
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8)
-	defer teardown(peers)
+
 
 	// Run choker
 	_, _, chokes, unchokes := ChokePeers(false, peers, false)
@@ -211,7 +211,7 @@ func TestChokePeersGivenDifferentSpeedsWhenSpeedChanges(t *testing.T) {
 	p7 := p7().dl(7).interested()
 	p8 := p8().dl(8)
 	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8)
-	defer teardown(peers)
+
 
 	_, _, chokes, unchokes := ChokePeers(false, peers, false)
 	containsPeers(t, chokes) // p1, p2, p3, p4 already choked
@@ -332,13 +332,9 @@ func (tp *TestPeer) uninterested() *TestPeer {
 }
 
 func (tp *TestPeer) with(mp *PieceMap, msgs ...ProtocolMessage) *TestPeer {
-	err, net, _, _ := OnReceiveMessages(msgs, tp.Peer, mp)
+	err, _, _, _ := OnReceiveMessages(msgs, tp.Peer, mp)
 	if err != nil {
 		panic(err)
-	}
-	// Send messages
-	for _, msg := range net {
-		tp.Add(msg)
 	}
 	return tp
 }
@@ -367,7 +363,6 @@ func per(i int, pm *PieceMap) *TestPeer {
 	out := make(chan ProtocolMessage)
 	p := NewPeer(
 		&PeerIdentity{[20]byte{}, strconv.Itoa(i)},
-		NewQueue(out, func(int, int) {}),
 		len(pm.pieces),
 		log.New(os.Stdout, "", log.LstdFlags))
 	return &TestPeer{p, out}
@@ -379,12 +374,6 @@ func asList(tps ...*TestPeer) []*Peer {
 		ps = append(ps, p.asPeer())
 	}
 	return ps
-}
-
-func teardown(peers []*Peer) {
-	for _, p := range peers {
-		p.queue.Close()
-	}
 }
 
 //----------------------------------------------------
