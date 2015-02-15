@@ -150,9 +150,10 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 			// Run piece picking algorithm
 			pp := PickPieces(peers, pieceMap)
 			for p, blocks := range pp {
+				// Send
+				buffers[p.Id()] <- AddMessages(msg)
 				for _, msg := range blocks {
-					// Send, mark as requested & add to pending map
-					buffers[p.Id()] <- msg // TODO: Send as batch
+					// Mark as requested & add to pending map
 					pieceMap.SetBlock(msg.index, msg.begin, REQUESTED)
 					p.blocks.Add(toOffset(msg.index, msg.begin, pieceMap.pieceSize))
 				}
