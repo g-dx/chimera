@@ -321,10 +321,6 @@ func (tp *TestPeer) asPeer() *Peer {
 	return tp.Peer
 }
 
-func pr(i int) *TestPeer {
-	return per(i, NewPieceMap(1, 1, 1))
-}
-
 func per(i int, pm *PieceMap) *TestPeer {
 	out := make(chan ProtocolMessage)
 	p := NewPeer(PeerIdentity(strconv.Itoa(i)), len(pm.pieces))
@@ -338,21 +334,6 @@ func asList(tps ...*TestPeer) []*Peer {
 	}
 	return ps
 }
-
-//----------------------------------------------------
-// Already named test peers
-//----------------------------------------------------
-
-func p1() *TestPeer  { return pr(1) }
-func p2() *TestPeer  { return pr(2) }
-func p3() *TestPeer  { return pr(3) }
-func p4() *TestPeer  { return pr(4) }
-func p5() *TestPeer  { return pr(5) }
-func p6() *TestPeer  { return pr(6) }
-func p7() *TestPeer  { return pr(7) }
-func p8() *TestPeer  { return pr(8) }
-func p9() *TestPeer  { return pr(9) }
-func p10() *TestPeer { return pr(10) }
 
 func pr1(rate int, ws WireState) *Peer { return p("p1", rate, ws) }
 func pr2(rate int, ws WireState) *Peer { return p("p2", rate, ws) }
