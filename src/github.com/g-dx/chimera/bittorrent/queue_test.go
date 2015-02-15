@@ -22,13 +22,26 @@ func TestBufferAddRemove(t *testing.T) {
 	in, out := Buffer(0)
 	defer func() { in <- CloseMessage{} }()
 
+	// Test single add + remove
 	for i, tt := range addRemoveTests {
-		for _, msg := range tt.msgs {
+		for _, expected := range tt.msgs {
 			// Send and receive
-			in <- msg
+			in <- AddMessage(expected)
 			actual := <- out
-			if msg != actual {
-				t.Errorf(errorString, i, ToString(msg), ToString(actual))
+			if expected != actual {
+				t.Errorf(errorString, i, ToString(expected), ToString(actual))
+			}
+		}
+	}
+
+	// Test bulk add + remove
+	for i, tt := range addRemoveTests {
+		// Send all
+		in <- AddMessages(tt.msgs)
+		for _, expected := range tt.msgs {
+			actual := <- out
+			if expected != actual {
+				t.Errorf(errorString, i, ToString(expected), ToString(actual))
 			}
 		}
 	}

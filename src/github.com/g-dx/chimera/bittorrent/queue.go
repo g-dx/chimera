@@ -11,6 +11,7 @@ import (
 // Supported message types
 type BufferMessage interface {}
 type AddMessage ProtocolMessage
+type AddMessages []ProtocolMessage
 type FilterMessage func(ProtocolMessage) bool
 type CloseMessage struct{}
 
@@ -55,6 +56,11 @@ func bufferImpl(in chan BufferMessage, out chan ProtocolMessage) {
 					}
 				}
 				pending = tmp
+
+			case AddMessages:
+				for _, msg := range m {
+					pending = append(pending, msg)
+				}
 
 			case AddMessage:
 				pending = append(pending, m)
