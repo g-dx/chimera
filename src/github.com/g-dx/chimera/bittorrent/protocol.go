@@ -175,9 +175,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 					continue
 				}
 				// Send to net
-				for _, msg := range net {
-					buffers[p.Id()] <- msg // TODO: Send as batch
-				}
+				buffers[p.Id()] <- AddMessages(msg)
 				// Send to disk
 				for _, msg := range disk {
 					io.dIn <- msg
