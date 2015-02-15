@@ -47,26 +47,6 @@ func (p *Peer) QueuedRequests() int {
 	return len(p.blocks)
 }
 
-func (p *Peer) Choke() {
-	p.ws = p.ws.Choking()
-}
-
-func (p *Peer) UnChoke(optimistic bool) {
-	ws := p.ws
-	// TODO: This isn't great
-	if optimistic {
-		ws = ws.Optimistic()
-	} else {
-		ws = ws.NotOptimistic()
-	}
-	p.ws = ws.NotNew().NotChoking()
-}
-
-func (p *Peer) ClearOptimistic() {
-	p.ws = p.ws.NotOptimistic()
-}
-
-
 // ----------------------------------------------------------------------------------
 // PeerStatistics
 // ----------------------------------------------------------------------------------
