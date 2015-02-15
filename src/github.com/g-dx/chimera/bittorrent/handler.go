@@ -12,9 +12,13 @@ func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) {
             case Choke: p.ws = p.ws.Choking()
             case Unchoke: p.ws = p.ws.NotChoking()
             case Uninterested: p.ws = p.ws.NotInterested()
-            case Cancel: // TODO: Remove from peer blocks
+			case Cancel:
+				p.blocks.Remove(toOffset(m.index, m.begin, mp.pieceSize))
+				// TODO: Return FilterMessage
+				// TODO: Return CancelDiskRead
             case Request: p.blocks.Add(toOffset(m.index, m.begin, mp.pieceSize))
-            case Have: // TODO: Check if we are not interested anymore
+			case Have:
+				// TODO: Check if we are not interested anymore
             case Bitfield, Block, KeepAlive, Interested:
             // No peer state change at present
             default:

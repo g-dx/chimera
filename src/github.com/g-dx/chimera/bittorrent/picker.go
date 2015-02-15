@@ -140,3 +140,7 @@ func (b set) Has(i int64) bool {
 func (b set) Add(i int64) {
 	b[i] = struct{}{}
 }
+
+func (b set) Remove(i int64) {
+	delete(b, i)
+}
