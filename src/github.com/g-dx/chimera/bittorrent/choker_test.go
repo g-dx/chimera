@@ -4,294 +4,262 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
-	"runtime"
+	"strings"
 )
+
+type ids []PeerIdentity
+type ps []*Peer
+var none = "<none>"
 
 func BenchmarkChokePeers10(b *testing.B) {
 
 	// Build a collection of peers in different states
-	p1 := p1().dl(1)
-	p2 := p2().dl(2).interested()
-	p3 := p3()
-	p4 := p4().dl(4).interested()
-	p5 := p5().dl(5)
-	p6 := p6()
-	p7 := p7().dl(7).interested()
-	p8 := p8().dl(8)
-	p9 := p9().dl(9).interested()
-	p10 := p10().dl(10).interested()
-
-	// Unchoke a few
-	p1.UnChoke(true)
-	p6.UnChoke(false)
-	p8.UnChoke(false)
-
-	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
+	ws := initWireState
+	peers := ps{
+		pr1(1, ws.NotChoking()),
+		pr2(2, ws.Interested()),
+		pr3(0, ws),
+		pr4(4, ws.Interested()),
+		pr5(5, ws),
+		pr6(0, ws.NotChoking()),
+		pr7(7, ws.Interested()),
+		pr8(8, ws.NotChoking()),
+	}
 
 	for i := 0; i < b.N; i++ {
 		ChokePeers(false, peers, true)
 	}
 }
 
-func TestBuildCandidatesGivenNewPeers(t *testing.T) {
+func TestBuildCandidates(t *testing.T) {
 
-	p1 := p1()
-	p2 := p2()
-	peers := asList(p1, p2)
+	ws := initWireState
+	tests := []struct {
+		ps ps
+		curOpt string
+		candidates ids
+	}{
+		{ ps{ pr1(1, ws), pr2(1, ws) }, none, ids{ "p1", "p1", "p1", "p2", "p2", "p2"}},
 
+		{ ps{ pr1(1, ws.NotNew()), pr2(1, ws) }, none, ids{ "p1", "p2", "p2", "p2"}},
 
-	c, cur := buildCandidates(peers)
-	intEquals(t, 6, len(c))
-	// TODO: Check cur == nil
+		{ ps{ pr1(1, ws.NotChoking().Optimistic()), pr2(1, ws) }, "p1", ids{ "p2", "p2", "p2"}},
+	}
 
-	// Set optimistic
-	p1.UnChoke(true)
+	for i, tt := range tests {
+		can, c := buildCandidates(tt.ps)
 
-	c, cur = buildCandidates(peers)
-	intEquals(t, 3, len(c))
-	anyEquals(t, p1.Id(), cur.Id())
-	anyEquals(t, p2.Id(), c[0].Id())
-	anyEquals(t, p2.Id(), c[1].Id())
-	anyEquals(t, p2.Id(), c[2].Id())
+		// Check current optimistic
+		var errMsgs []string
+		errMsgs = checkPeer(errMsgs, "Current Optimistic", tt.curOpt, c)
 
-	// Clear
-	// TODO: This isn't great
-	p1.Choke()
-	p1.ClearOptimistic()
-	c, cur = buildCandidates(peers)
-	intEquals(t, 4, len(c))
-	// TODO: Check cur == nil
-}
-
-func TestChokePeersGivenNoPeers(t *testing.T) {
-	peers := asList()
-	_, _, chokes, unchokes := ChokePeers(false, peers, false)
-	containsPeers(t, unchokes)
-	containsPeers(t, chokes)
-}
-
-func TestChokePeersGivenNoOptimisticCandidatesAndExistingOptimistic(t *testing.T) {
-
-	p1 := p1()
-	p2 := p2()
-	peers := asList(p1, p2)
-
-
-	// Set optimistic and unchoked
-	p1.UnChoke(true)
-	p2.UnChoke(false)
-
-	// Run choker & check optimistic has *not* changed
-	old, new, chokes, unchokes := ChokePeers(false, peers, true)
-
-	containsPeers(t, unchokes) // p1 already unchoked
-	containsPeers(t, chokes, p2)
-	if old.Id() != new.Id() {
-		t.Errorf("Expected: %v, Actual: %v", old.Id(), new.Id())
+		// Check candidates
+		notFound, notExpected := containsPeers(tt.candidates, toPeerIdentities(can))
+		errMsgs = checkPeers(errMsgs, "Optimistic Candidates", notFound, notExpected)
+		if len(errMsgs) > 0 {
+			t.Errorf("Run: %v\n%v", i, strings.Join(errMsgs, "\n"))
+		}
 	}
 }
 
-func TestChokePeersGivenNoOptimisticCandidatesAndNoOptimistic(t *testing.T) {
+func TestChokePeers(t *testing.T) {
 
-	p1 := p1()
-	p2 := p2()
-	peers := asList(p1, p2)
+	// Init download & upload rate & wire state
+	ws := initWireState
+	tests := []struct {
+		ps ps
+		changeOpt bool
+		oldOpt string
+		newOpt string
+		chokes ids
+		unchokes ids
+	}{
 
+		//------------------------------------------------------------------------------------------
+		// 0.
+		// Check empty
+		{ ps{}, false, none, none, ids{}, ids{} },
 
-	// Set both unchoke
-	p1.UnChoke(false)
-	p2.UnChoke(false)
+		//------------------------------------------------------------------------------------------
+		// 1.
+		// Check empty
+		{ ps{}, true, none, none, ids{}, ids{} },
 
-	// Run choker & check no optimistic
-	old, new, chokes, unchokes := ChokePeers(false, peers, true)
-	containsPeers(t, chokes, p1, p2)
-	containsPeers(t, unchokes)
-	if old != nil {
-		t.Errorf("Expected: nil, Actual: %v", old.Id())
+		//------------------------------------------------------------------------------------------
+		// 2.
+		// Check p1 unchoked + p2 as optimistic
+		// NOTE: p2 is chosen as optimistic "randomly"
+		{ ps{
+			pr1(10, ws.Interested()),
+			pr2(10, ws),
+		  }, true, none, "p2", ids{}, ids{ "p1", "p2"},
+		},
+
+		//------------------------------------------------------------------------------------------
+		// 3.
+		// Check both choked
+		{ ps{
+			pr1(10, ws.NotChoking()),
+			pr2(10, ws.NotChoking()),
+		  }, false, none, none, ids{ "p1", "p2"}, ids{},
+		},
+
+		//------------------------------------------------------------------------------------------
+		// 4.
+		// Check optimistic does not change & only unchoke gets choked
+		{ ps{
+			pr1(10, ws.Optimistic().NotChoking()),
+			pr2(10, ws.NotChoking()),
+		  }, true, "p1", "p1", ids{ "p2" }, ids{},
+		},
+
+		//------------------------------------------------------------------------------------------
+		// 5.
+		// Check no unchokes
+		{ ps{
+			pr1(10, ws),
+			pr2(10, ws),
+			pr3(10, ws),
+		  }, false, none, none, ids{}, ids{},
+		},
+
+		//------------------------------------------------------------------------------------------
+		// 6.
+		// Check interested gets unchoked with all faster peers & unchoked, uninterested gets choked
+		{ ps{
+			pr1(10, ws.NotChoking()),
+			pr2(20, ws.Interested()),
+			pr3(30, ws),
+		  }, false, none, none, ids{ "p1"}, ids{ "p2", "p3" },
+		},
+
+		//------------------------------------------------------------------------------------------
+		// 7.
+		// Check uninterested unchokes get choked
+		{ ps{
+			pr1(10, ws),
+			pr2(20, ws.NotChoking()),
+			pr3(30, ws.Interested().NotChoking()),
+		  }, false, none, none, ids{ "p2" }, ids{},
+		},
+
+		//------------------------------------------------------------------------------------------
+		// 8.
+		// Ensure slow, uninterested, unchoke peer gets choked
+		{ ps{
+			pr1(30, ws.Interested().NotChoking()),
+			pr2(20, ws.Interested().NotChoking()),
+			pr3(10, ws.NotChoking()),
+		  }, false, none, none, ids{ "p3" }, ids{},
+		},
+
+		//------------------------------------------------------------------------------------------
+		// 9.
+		// Check at most 4 interested unchokes even when more interested & faster uninterested
+		{ ps{
+			pr1(10, ws.Interested()),
+			pr2(20, ws.Interested()),
+			pr3(30, ws.Interested()),
+			pr4(40, ws.Interested()),
+			pr5(50, ws.Interested()),
+			pr6(60, ws.Interested()),
+			pr7(70, ws),
+		  }, false, none, none, ids{}, ids{ "p3", "p4", "p5", "p6", "p7" },
+		},
+
+		//------------------------------------------------------------------------------------------
+		// 10.
+		// Check slower interested unchoked peers get choked
+		{ ps{
+			pr1(10, ws.Interested().NotChoking()),
+			pr2(20, ws.Interested().NotChoking()),
+			pr3(30, ws.Interested().NotChoking()),
+			pr4(40, ws.Interested().NotChoking()),
+			pr5(50, ws.Interested().NotChoking()),
+			pr6(60, ws.Interested().NotChoking()),
+			pr7(70, ws.NotChoking()),
+          }, false, none, none, ids{ "p1", "p2"}, ids{},
+		},
 	}
-	if new != nil {
-		t.Errorf("Expected: nil, Actual: %v", new.Id())
+
+	for i, tt := range tests {
+		// Perform choking
+		old, new, chokes, unchokes := ChokePeers(false, tt.ps, tt.changeOpt)
+
+		// Check old optimistic
+		var errMsgs []string
+		errMsgs = checkPeer(errMsgs, "Old Opt ", tt.oldOpt, old)
+
+		// Check new optimistic
+		errMsgs = checkPeer(errMsgs, "New Opt ", tt.newOpt, new)
+
+		// Check all chokes present
+		notFound, notExpected := containsPeers(tt.chokes, toPeerIdentities(chokes))
+		errMsgs = checkPeers(errMsgs, "Chokes  ", notFound, notExpected)
+
+		// Check all unchokes present
+		notFound, notExpected = containsPeers(tt.unchokes, toPeerIdentities(unchokes))
+		errMsgs = checkPeers(errMsgs, "Unchokes", notFound, notExpected)
+
+		// Print error
+		if len(errMsgs) > 0 {
+			t.Errorf("Run: %v\n%v", i, strings.Join(errMsgs, "\n"))
+		}
 	}
 }
 
-func TestChokePeersGivenNoInterestedPeers(t *testing.T) {
-
-	p1 := p1()
-	p2 := p2()
-	p3 := p3()
-	peers := asList(p1, p2, p3)
-
-
-	// Run choker & check all still choked
-	_, _, chokes, unchokes := ChokePeers(false, peers, false)
-	containsPeers(t, chokes) // p1, p2, p3 already choked
-	containsPeers(t, unchokes)
+func checkPeer(errMsgs []string, op string, expected string, actual *Peer) []string {
+	if actual != nil && string(actual.Id()) != expected {
+		errMsgs = append(errMsgs, fmt.Sprintf("%v: Expected: %v, Actual: %v", op, expected, actual.Id()))
+	}
+	if actual == nil && expected != none {
+		errMsgs = append(errMsgs, fmt.Sprintf("%v: Expected: %v, Actual: %v", op, expected, none))
+	}
+	return errMsgs
 }
 
-func TestChokePeersGivenSameSpeedPeersWhenInterestChanges(t *testing.T) {
-
-	p1 := p1().dl(1).interested()
-	p2 := p2().dl(1)
-	p3 := p3().dl(1)
-	peers := asList(p1, p2, p3)
-
-
-	// Run choker
-	_, _, chokes, unchokes := ChokePeers(false, peers, false)
-	containsPeers(t, chokes) // p2 & p3 already choked
-	containsPeers(t, unchokes, p1)
-	applyChokesAndUnchokes(chokes, unchokes)
-
-	// Alter interest and run choker
-	p1.uninterested()
-	p3.interested()
-	_, _, chokes, unchokes = ChokePeers(false, peers, false)
-	containsPeers(t, chokes, p1) // p2 already choked
-	containsPeers(t, unchokes, p3)
-	applyChokesAndUnchokes(chokes, unchokes)
-
-	// Alter interest and run choker
-	p2.interested()
-	p3.uninterested()
-	_, _, chokes, unchokes = ChokePeers(false, peers, false)
-	containsPeers(t, chokes, p3) // p1 already choked
-	containsPeers(t, unchokes, p2)
+func checkPeers(errMsgs []string, op string, notFound []string, notExpected []string) []string {
+	if len(notFound) > 0 {
+		errMsgs = append(errMsgs, fmt.Sprintf("%v:   Expected (%v)", op, strings.Join(notFound, ",")))
+	}
+	if len(notExpected) > 0 {
+		errMsgs = append(errMsgs, fmt.Sprintf("%v: Unexpected (%v)", op, strings.Join(notExpected, ",")))
+	}
+	return errMsgs
 }
 
-func TestChokePeersGivenDifferentSpeedsWhenInterestChanges(t *testing.T) {
-
-	p1 := p1().dl(1)
-	p2 := p2().dl(2).interested()
-	p3 := p3().dl(3)
-	p4 := p4().dl(4).interested()
-	p5 := p5().dl(5)
-	p6 := p6().dl(6)
-	p7 := p7().dl(7).interested()
-	p8 := p8().dl(8)
-	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8)
-
-
-	// Run choker
-	_, _, chokes, unchokes := ChokePeers(false, peers, false)
-	containsPeers(t, chokes) // p1 already choked
-	containsPeers(t, unchokes, p2, p3, p4, p5, p6, p7, p8)
-	applyChokesAndUnchokes(chokes, unchokes)
-
-	// Alter interest & run choker
-	p2.uninterested()
-	_, _, chokes, unchokes = ChokePeers(false, peers, false)
-	containsPeers(t, chokes, p2, p3) // p1 already choked
-	containsPeers(t, unchokes) // p4, p5, p6, p7, p8 already unchoked
-	applyChokesAndUnchokes(chokes, unchokes)
-
-	// Alter interest & run choker
-	p4.uninterested()
-	_, _, chokes, unchokes = ChokePeers(false, peers, false)
-	containsPeers(t, chokes, p4, p5, p6) // p1, p2, p3 already choked
-	containsPeers(t, unchokes) // p7, p8 already unchoked
-	applyChokesAndUnchokes(chokes, unchokes)
-
-	// Alter interest & run choker
-	p7.uninterested()
-	_, _, chokes, unchokes = ChokePeers(false, peers, false)
-	containsPeers(t, chokes, p7, p8)
-	containsPeers(t, unchokes)
-}
-
-func TestChokePeersGivenDifferentSpeedsWhenSpeedChanges(t *testing.T) {
-
-	p1 := p1().dl(1)
-	p2 := p2().dl(2)
-	p3 := p3().dl(3)
-	p4 := p4().dl(4)
-	p5 := p5().dl(5).interested()
-	p6 := p6().dl(6).interested()
-	p7 := p7().dl(7).interested()
-	p8 := p8().dl(8)
-	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8)
-
-
-	_, _, chokes, unchokes := ChokePeers(false, peers, false)
-	containsPeers(t, chokes) // p1, p2, p3, p4 already choked
-	containsPeers(t, unchokes, p5, p6, p7, p8)
-	applyChokesAndUnchokes(chokes, unchokes)
-
-	// Alter speed & run choker
-	p5.dl(9)
-	p6.dl(10)
-	p7.dl(11)
-	_, _, chokes, unchokes = ChokePeers(false, peers, false)
-	containsPeers(t, chokes, p8) // p1, p2, p3, p4 already choked
-	containsPeers(t, unchokes) // p5, p6, p7 already unchoked
-}
-
-func toList(ps []*Peer) string {
-	var s string
+func toPeerIdentities(ps []*Peer) (ids []PeerIdentity) {
 	for _, p := range ps {
-		s += string(p.Id())
-		s += ", "
+		ids = append(ids, p.Id())
 	}
-	return s
+	return ids
 }
 
-func applyChokesAndUnchokes(chokes, unchokes []*Peer) {
-	for _, p := range chokes {
-		p.Choke()
+func containsPeerIdentity(b PeerIdentity, ids []PeerIdentity) bool {
+	for _, a := range ids {
+		if a == b {
+			return true
+		}
 	}
-	for _, p := range unchokes {
-		p.UnChoke(false) // TODO: is this correct?
-	}
+	return false
 }
 
-func containsPeers(t *testing.T, expected []*Peer, actual ...*TestPeer)  {
+func containsPeers(expected []PeerIdentity, actual []PeerIdentity) (notFound []string, notExpected []string) {
 
 	// Check all actual present in expected
-	for _, p1 := range actual {
-		var found bool
-		for _, p2 := range expected {
-			if p1.Peer.Id() == p2.Id() {
-				found = true
-				break
-			}
-		}
-		if !found {
-			_, _, line, _ := runtime.Caller(1)
-			t.Errorf("Line: %v, Expected: %v - Not Found", line, p1.Peer.Id())
+	for _, id := range actual {
+		if !containsPeerIdentity(id, expected) {
+			notExpected = append(notExpected, string(id))
 		}
 	}
 
 	// Check all expected present in actual
-	for _, p1 := range expected {
-		var found bool
-		for _, p2 := range actual {
-			if p1.Id() == p2.Peer.Id() {
-				found = true
-				break
-			}
-		}
-		if !found {
-			_, _, line, _ := runtime.Caller(1)
-			t.Errorf("Line: %v, Expected: %v - Not Found", line, p1.Id())
+	for _, id := range expected {
+		if !containsPeerIdentity(id, actual) {
+			notFound = append(notFound, string(id))
 		}
 	}
-}
-
-func assertChoked(t *testing.T, peers ...*TestPeer) {
-	assertChokeStatus(t, true, peers)
-}
-
-func assertUnchoked(t *testing.T, peers ...*TestPeer) {
-	assertChokeStatus(t, false, peers)
-}
-
-func assertChokeStatus(t *testing.T, b bool, peers []*TestPeer) {
-	for _, p := range peers {
-		if p.State().IsChoked() != b {
-			expected := fmt.Sprintf("p(%v) choke=%v", p.Id(), b)
-			actual := fmt.Sprintf("p(%v) choke=%v", p.Id(), p.State().IsChoked())
-			t.Errorf(buildUnequalMessage(3, expected, actual))
-		}
-	}
+	return notFound, notExpected
 }
 
 type TestPeer struct {
@@ -385,3 +353,20 @@ func p7() *TestPeer  { return pr(7) }
 func p8() *TestPeer  { return pr(8) }
 func p9() *TestPeer  { return pr(9) }
 func p10() *TestPeer { return pr(10) }
+
+func pr1(rate int, ws WireState) *Peer { return p("p1", rate, ws) }
+func pr2(rate int, ws WireState) *Peer { return p("p2", rate, ws) }
+func pr3(rate int, ws WireState) *Peer { return p("p3", rate, ws) }
+func pr4(rate int, ws WireState) *Peer { return p("p4", rate, ws) }
+func pr5(rate int, ws WireState) *Peer { return p("p5", rate, ws) }
+func pr6(rate int, ws WireState) *Peer { return p("p6", rate, ws) }
+func pr7(rate int, ws WireState) *Peer { return p("p7", rate, ws) }
+func pr8(rate int, ws WireState) *Peer { return p("p8", rate, ws) }
+
+func p(id string, rate int, ws WireState) *Peer {
+	p := NewPeer(PeerIdentity(id), 0) // No of pieces not important
+	p.ws = ws
+	p.Stats().Download.rate = rate
+	p.Stats().Upload.rate = rate
+	return p
+}
