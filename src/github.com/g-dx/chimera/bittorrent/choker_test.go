@@ -16,14 +16,14 @@ func BenchmarkChokePeers10(b *testing.B) {
 	// Build a collection of peers in different states
 	ws := initWireState
 	peers := ps{
-		pr1(1, ws.NotChoking()),
-		pr2(2, ws.Interested()),
-		pr3(0, ws),
-		pr4(4, ws.Interested()),
-		pr5(5, ws),
-		pr6(0, ws.NotChoking()),
-		pr7(7, ws.Interested()),
-		pr8(8, ws.NotChoking()),
+		p1(1, ws.NotChoking()),
+		p2(2, ws.Interested()),
+		p3(0, ws),
+		p4(4, ws.Interested()),
+		p5(5, ws),
+		p6(0, ws.NotChoking()),
+		p7(7, ws.Interested()),
+		p8(8, ws.NotChoking()),
 	}
 
 	for i := 0; i < b.N; i++ {
@@ -39,11 +39,11 @@ func TestBuildCandidates(t *testing.T) {
 		curOpt string
 		candidates ids
 	}{
-		{ ps{ pr1(1, ws), pr2(1, ws) }, none, ids{ "p1", "p1", "p1", "p2", "p2", "p2"}},
+		{ ps{ p1(1, ws), p2(1, ws) }, none, ids{ "p1", "p1", "p1", "p2", "p2", "p2"}},
 
-		{ ps{ pr1(1, ws.NotNew()), pr2(1, ws) }, none, ids{ "p1", "p2", "p2", "p2"}},
+		{ ps{ p1(1, ws.NotNew()), p2(1, ws) }, none, ids{ "p1", "p2", "p2", "p2"}},
 
-		{ ps{ pr1(1, ws.NotChoking().Optimistic()), pr2(1, ws) }, "p1", ids{ "p2", "p2", "p2"}},
+		{ ps{ p1(1, ws.NotChoking().Optimistic()), p2(1, ws) }, "p1", ids{ "p2", "p2", "p2"}},
 	}
 
 	for i, tt := range tests {
@@ -90,8 +90,8 @@ func TestChokePeers(t *testing.T) {
 		// Check p1 unchoked + p2 as optimistic
 		// NOTE: p2 is chosen as optimistic "randomly"
 		{ ps{
-			pr1(10, ws.Interested()),
-			pr2(10, ws),
+			p1(10, ws.Interested()),
+			p2(10, ws),
 		  }, true, none, "p2", ids{}, ids{ "p1", "p2"},
 		},
 
@@ -99,8 +99,8 @@ func TestChokePeers(t *testing.T) {
 		// 3.
 		// Check both choked
 		{ ps{
-			pr1(10, ws.NotChoking()),
-			pr2(10, ws.NotChoking()),
+			p1(10, ws.NotChoking()),
+			p2(10, ws.NotChoking()),
 		  }, false, none, none, ids{ "p1", "p2"}, ids{},
 		},
 
@@ -108,8 +108,8 @@ func TestChokePeers(t *testing.T) {
 		// 4.
 		// Check optimistic does not change & only unchoke gets choked
 		{ ps{
-			pr1(10, ws.Optimistic().NotChoking()),
-			pr2(10, ws.NotChoking()),
+			p1(10, ws.Optimistic().NotChoking()),
+			p2(10, ws.NotChoking()),
 		  }, true, "p1", "p1", ids{ "p2" }, ids{},
 		},
 
@@ -117,9 +117,9 @@ func TestChokePeers(t *testing.T) {
 		// 5.
 		// Check no unchokes
 		{ ps{
-			pr1(10, ws),
-			pr2(10, ws),
-			pr3(10, ws),
+			p1(10, ws),
+			p2(10, ws),
+			p3(10, ws),
 		  }, false, none, none, ids{}, ids{},
 		},
 
@@ -127,9 +127,9 @@ func TestChokePeers(t *testing.T) {
 		// 6.
 		// Check interested gets unchoked with all faster peers & unchoked, uninterested gets choked
 		{ ps{
-			pr1(10, ws.NotChoking()),
-			pr2(20, ws.Interested()),
-			pr3(30, ws),
+			p1(10, ws.NotChoking()),
+			p2(20, ws.Interested()),
+			p3(30, ws),
 		  }, false, none, none, ids{ "p1"}, ids{ "p2", "p3" },
 		},
 
@@ -137,9 +137,9 @@ func TestChokePeers(t *testing.T) {
 		// 7.
 		// Check uninterested unchokes get choked
 		{ ps{
-			pr1(10, ws),
-			pr2(20, ws.NotChoking()),
-			pr3(30, ws.Interested().NotChoking()),
+			p1(10, ws),
+			p2(20, ws.NotChoking()),
+			p3(30, ws.Interested().NotChoking()),
 		  }, false, none, none, ids{ "p2" }, ids{},
 		},
 
@@ -147,9 +147,9 @@ func TestChokePeers(t *testing.T) {
 		// 8.
 		// Ensure slow, uninterested, unchoke peer gets choked
 		{ ps{
-			pr1(30, ws.Interested().NotChoking()),
-			pr2(20, ws.Interested().NotChoking()),
-			pr3(10, ws.NotChoking()),
+			p1(30, ws.Interested().NotChoking()),
+			p2(20, ws.Interested().NotChoking()),
+			p3(10, ws.NotChoking()),
 		  }, false, none, none, ids{ "p3" }, ids{},
 		},
 
@@ -157,13 +157,13 @@ func TestChokePeers(t *testing.T) {
 		// 9.
 		// Check at most 4 interested unchokes even when more interested & faster uninterested
 		{ ps{
-			pr1(10, ws.Interested()),
-			pr2(20, ws.Interested()),
-			pr3(30, ws.Interested()),
-			pr4(40, ws.Interested()),
-			pr5(50, ws.Interested()),
-			pr6(60, ws.Interested()),
-			pr7(70, ws),
+			p1(10, ws.Interested()),
+			p2(20, ws.Interested()),
+			p3(30, ws.Interested()),
+			p4(40, ws.Interested()),
+			p5(50, ws.Interested()),
+			p6(60, ws.Interested()),
+			p7(70, ws),
 		  }, false, none, none, ids{}, ids{ "p3", "p4", "p5", "p6", "p7" },
 		},
 
@@ -171,13 +171,13 @@ func TestChokePeers(t *testing.T) {
 		// 10.
 		// Check slower interested unchoked peers get choked
 		{ ps{
-			pr1(10, ws.Interested().NotChoking()),
-			pr2(20, ws.Interested().NotChoking()),
-			pr3(30, ws.Interested().NotChoking()),
-			pr4(40, ws.Interested().NotChoking()),
-			pr5(50, ws.Interested().NotChoking()),
-			pr6(60, ws.Interested().NotChoking()),
-			pr7(70, ws.NotChoking()),
+			p1(10, ws.Interested().NotChoking()),
+			p2(20, ws.Interested().NotChoking()),
+			p3(30, ws.Interested().NotChoking()),
+			p4(40, ws.Interested().NotChoking()),
+			p5(50, ws.Interested().NotChoking()),
+			p6(60, ws.Interested().NotChoking()),
+			p7(70, ws.NotChoking()),
           }, false, none, none, ids{ "p1", "p2"}, ids{},
 		},
 	}
@@ -335,14 +335,14 @@ func asList(tps ...*TestPeer) []*Peer {
 	return ps
 }
 
-func pr1(rate int, ws WireState) *Peer { return p("p1", rate, ws) }
-func pr2(rate int, ws WireState) *Peer { return p("p2", rate, ws) }
-func pr3(rate int, ws WireState) *Peer { return p("p3", rate, ws) }
-func pr4(rate int, ws WireState) *Peer { return p("p4", rate, ws) }
-func pr5(rate int, ws WireState) *Peer { return p("p5", rate, ws) }
-func pr6(rate int, ws WireState) *Peer { return p("p6", rate, ws) }
-func pr7(rate int, ws WireState) *Peer { return p("p7", rate, ws) }
-func pr8(rate int, ws WireState) *Peer { return p("p8", rate, ws) }
+func p1(rate int, ws WireState) *Peer { return p("p1", rate, ws) }
+func p2(rate int, ws WireState) *Peer { return p("p2", rate, ws) }
+func p3(rate int, ws WireState) *Peer { return p("p3", rate, ws) }
+func p4(rate int, ws WireState) *Peer { return p("p4", rate, ws) }
+func p5(rate int, ws WireState) *Peer { return p("p5", rate, ws) }
+func p6(rate int, ws WireState) *Peer { return p("p6", rate, ws) }
+func p7(rate int, ws WireState) *Peer { return p("p7", rate, ws) }
+func p8(rate int, ws WireState) *Peer { return p("p8", rate, ws) }
 
 func p(id string, rate int, ws WireState) *Peer {
 	p := NewPeer(PeerIdentity(id), 0) // No of pieces not important
