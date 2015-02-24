@@ -81,7 +81,7 @@ func TestBufferFilter(t *testing.T) {
 		// Create buffer
 		in, out := Buffer(0)
 		// Send
-		for _, msg := range tt.msgs { in <- AddMessage(msg) }
+		in <- AddMessages(tt.msgs)
 		// Filter
 		in <- FilterMessage(tt.f)
 		// Receive
