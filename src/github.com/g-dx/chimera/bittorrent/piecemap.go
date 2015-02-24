@@ -83,6 +83,14 @@ func (pm *PieceMap) Piece(i int) *Piece {
 	return pm.pieces[i]
 }
 
+func (p *PieceMap) ReturnOffsets(offs set) {
+    for off, _ := range offs {
+        index := off/int64(p.pieceSize)
+        begin := int(off%int64(p.pieceSize))
+        p.pieces[index].ReturnBlock2(begin)
+    }
+}
+
 func (p *PieceMap) ReturnBlocks(reqs []Request) {
 	for _, req := range reqs {
 		// Reset block state to needed and ensure overall piece state is blocks needed
@@ -225,16 +233,20 @@ func (p *Piece) TakeBlocks(n int) []Request {
 }
 
 func (p *Piece) ReturnBlock(req Request) {
-	p.blocks[req.begin/_16KB] = NEEDED
+	p.ReturnBlock2(req.begin)
+}
 
-	// Ensure we set
-	p.state = NOT_STARTED
-	for _, s := range p.blocks {
-		if s == REQUESTED {
-			p.state = BLOCKS_NEEDED
-			return
-		}
-	}
+func (p *Piece) ReturnBlock2(begin int) {
+    p.blocks[begin/_16KB] = NEEDED
+
+    // Ensure we set
+    p.state = NOT_STARTED
+    for _, s := range p.blocks {
+        if s == REQUESTED {
+            p.state = BLOCKS_NEEDED
+            return
+        }
+    }
 }
 
 func (p *Piece) IsComplete() bool {

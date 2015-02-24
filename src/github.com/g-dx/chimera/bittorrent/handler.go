@@ -31,12 +31,12 @@ func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) AddMessages {
 }
 
 // Updates the peer in response to receiving a message
-func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []ProtocolMessage, []DiskMessage, []int64) {
+func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []ProtocolMessage, []DiskMessage) {
 
 	// State to build during message processing
 	var out []ProtocolMessage
 	var ops []DiskMessage
-	var blocks []int64
+	var blocks set
 	var err error
 	ws := p.ws
 	bf := p.bitfield
@@ -48,10 +48,7 @@ func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []
 
 		// Handle message
 		switch m := msg.(type) {
-		case Choke:
-			ws, blocks = onChoke(ws, p.blocks)
-            // TODO: Should return blocks to piecemap
-			p.blocks = make(set)
+		case Choke: ws, blocks = onChoke(ws, p.blocks, mp)
 		case Unchoke: ws = onUnchoke(ws)
 		case Interested: ws = onInterested(ws)
 		case Uninterested: ws = onUninterested(ws)
@@ -84,15 +81,13 @@ func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []
 	// Update peer state
 	p.ws = ws
 	p.bitfield = bf
-	return nil, out, ops, blocks
+    p.blocks = blocks
+	return nil, out, ops
 }
 
-func onChoke(ws WireState, blocks set) (WireState, []int64) {
-	ret := make([]int64, len(blocks))
-	for block, _ := range blocks {
-		ret = append(ret, block)
-	}
-	return ws.Choked(), ret
+func onChoke(ws WireState, blocks set, mp *PieceMap) (WireState, set) {
+    mp.ReturnOffsets(blocks)
+	return ws.Choked(), make(set)
 }
 
 func onUnchoke(ws WireState) WireState {

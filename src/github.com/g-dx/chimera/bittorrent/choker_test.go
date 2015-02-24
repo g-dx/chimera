@@ -298,7 +298,7 @@ func (tp *TestPeer) uninterested() *TestPeer {
 }
 
 func (tp *TestPeer) with(mp *PieceMap, msgs ...ProtocolMessage) *TestPeer {
-	err, _, _, _ := OnReceiveMessages(msgs, tp.Peer, mp)
+	err, _, _ := OnReceiveMessages(msgs, tp.Peer, mp)
 	if err != nil {
 		panic(err)
 	}

@@ -164,7 +164,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 			p := findPeer(list.id, peers)
 			if p != nil {
 				// Process all messages
-				err, net, disk, blocks := OnReceiveMessages(list.msgs, p, pieceMap)
+				err, net, disk := OnReceiveMessages(list.msgs, p, pieceMap)
 				if err != nil {
 					closePeer(p, err)
 					continue
@@ -174,10 +174,6 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 				// Send to disk
 				for _, msg := range disk {
 					io.dIn <- msg
-				}
-				// Return blocks to piecemap
-				for _, _ = range blocks {
-//					ph.pieceMap.ReturnBlock() // TODO: Calculate index & begin
 				}
 			}
 
