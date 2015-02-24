@@ -5,18 +5,19 @@ type OutgoingMessagesHandler func ([]ProtocolMessage, *Peer)
 type IncomingMessagesHandler func ([]ProtocolMessage, *Peer, *PieceMap) (error, []ProtocolMessage, []DiskMessage, []int64)
 
 // Updates the peer in preparation for sending a message
-func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) {
+func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) AddMessages {
 
+	var ext []ProtocolMessage
     for _, msg := range msgs {
         switch m := msg.(type) {
             case Choke: p.ws = p.ws.Choking()
             case Unchoke: p.ws = p.ws.NotChoking()
             case Uninterested: p.ws = p.ws.NotInterested()
 			case Cancel:
-				p.blocks.Remove(toOffset(m.index, m.begin, mp.pieceSize))
-				// TODO: Return FilterMessage
-				// TODO: Return CancelDiskRead
-            case Request: p.blocks.Add(toOffset(m.index, m.begin, mp.pieceSize))
+                p.blocks.Remove(toOffset(m.index, m.begin, mp.pieceSize))
+			case Request:
+				mp.SetBlock(m.index, m.begin, REQUESTED)
+				p.blocks.Add(toOffset(m.index, m.begin, mp.pieceSize))
 			case Have:
 				// TODO: Check if we are not interested anymore
             case Bitfield, Block, KeepAlive, Interested:
@@ -25,6 +26,8 @@ func OnSendMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) {
             // No peer state change at present
         }
     }
+
+	return AddMessages(append(msgs, ext...))
 }
 
 // Updates the peer in response to receiving a message
@@ -47,6 +50,7 @@ func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []
 		switch m := msg.(type) {
 		case Choke:
 			ws, blocks = onChoke(ws, p.blocks)
+            // TODO: Should return blocks to piecemap
 			p.blocks = make(set)
 		case Unchoke: ws = onUnchoke(ws)
 		case Interested: ws = onInterested(ws)
@@ -126,7 +130,8 @@ func onHave(index int, ws WireState, bitfield *BitSet, mp *PieceMap) (error, Wir
 }
 
 func onCancel(index, begin, length int) error {
-	// TODO: Implement cancel support
+    // TODO: Return FilterMessage
+    // TODO: Return CancelDiskRead
 	return nil
 }
 

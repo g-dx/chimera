@@ -26,7 +26,7 @@ func (b ByPriority) Len() int           { return len(b) }
 func (b ByPriority) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
 func (b ByPriority) Less(i, j int) bool { return b[i].Priority() < b[j].Priority() }
 
-func PickPieces(peers []*Peer, pieceMap *PieceMap) map[*Peer][]Request {
+func PickPieces(peers []*Peer, pieceMap *PieceMap) map[*Peer][]ProtocolMessage {
 
 	// Sort into fastest downloaders
 	sortedPeers := make([]*Peer, len(peers))
@@ -35,9 +35,9 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap) map[*Peer][]Request {
 
 	// For each unchoked & interesting peer calculate blocks to pick
 
-	taken := make(set)    // The blocks which have already been taken
-	complete := make(set) // The pieces whose block have are all requested or taken
-	picked := make(map[*Peer][]Request) // The blocks picked for each peer
+	takenBlocks := make(set)    // The blocks which have already been taken
+	completedPieces := make(set) // The pieces whose block have are all requested or taken
+	picked := make(map[*Peer][]ProtocolMessage) // The blocks picked for each peer
 
 	for _, peer := range sortedPeers {
 		if peer.State().CanDownload() {
@@ -45,31 +45,28 @@ func PickPieces(peers []*Peer, pieceMap *PieceMap) map[*Peer][]Request {
 			// Find total required
 			n := 10 - peer.QueuedRequests() // TODO: Make configurable
 
-			reqs := make([]Request, 0, n)
-			for _, p := range availablePieces(complete, pieceMap, peer.bitfield, n) {
+			r := make([]ProtocolMessage, 0, n)
+			for _, p := range availablePieces(completedPieces, pieceMap, peer.bitfield, n) {
 
 				// Pick all the pieces we can
-				blocks, wanted, pieceDone := pick(taken, p, n, pieceMap.pieceSize)
-				reqs = append(reqs, blocks...)
-				n -= len(blocks)
+				blocks, done := pickBlocks(takenBlocks, p, n, pieceMap.pieceSize)
+                if done {
+                    completedPieces.Add(int64(p.index))
+                }
 
-				// Update taken blocks
+                // Add to peer picks and update taken set
 				for _, block := range blocks {
-					taken.Add(toOffset(p.index, int(block.begin/_16KB), pieceMap.pieceSize))
+                    r = append(r, block)
+					takenBlocks.Add(toOffset(p.index, int(block.begin/_16KB), pieceMap.pieceSize))
 				}
 
-				if pieceDone {
-					complete.Add(int64(p.index))
-				}
-
-				// If we got all we wanted
-				if wanted {
-					break
-				}
+                if len(blocks) == n {
+                    break
+                }
 			}
 
 			// Set picked pieces for peer
-			picked[peer] = reqs
+			picked[peer] = r
 		}
 	}
 
@@ -80,20 +77,16 @@ func availablePieces(complete set, pieceMap *PieceMap, bitfield *BitSet, n int) 
 
 	// Find all pieces which this peer has which still require blocks
 	pieces := make([]*Piece, 0, n)
-	if n == 0 {
-		return pieces
-	}
-
 	for _, piece := range pieceMap.pieces {
+
+        // Each piece must have at least one free block so take at most the number of blocks
+        if len(pieces) == n {
+            break
+        }
 
 		// If this piece hasn't been completed already AND it isn't fully requested AND this peer has it
 		if !complete.Has(int64(piece.index)) && !piece.FullyRequested() && bitfield.Have(piece.index) {
 			pieces = append(pieces, piece)
-		}
-
-		// Each piece must have at least one free block so take at most the number of blocks
-		if len(pieces) == n {
-			break
 		}
 	}
 
@@ -103,7 +96,7 @@ func availablePieces(complete set, pieceMap *PieceMap, bitfield *BitSet, n int) 
 }
 
 
-func pick(taken set, p *Piece, wanted, pieceSize int) ([]Request, bool, bool) {
+func pickBlocks(taken set, p *Piece, wanted, pieceSize int) ([]Request, bool) {
 
 	reqs := make([]Request, 0, wanted)
 	for i, s := range p.blocks {
@@ -114,11 +107,11 @@ func pick(taken set, p *Piece, wanted, pieceSize int) ([]Request, bool, bool) {
 			// Add request & check if we are done
 			reqs = append(reqs, Request{p.index, i*_16KB, p.BlockLen(i)})
 			if len(reqs) == wanted {
-				return reqs, true, i == len(p.blocks)-1
+				return reqs, i == len(p.blocks)-1
 			}
 		}
 	}
-	return reqs, false, false
+	return reqs, false
 }
 
 // Return the global offset of a block within the entire file

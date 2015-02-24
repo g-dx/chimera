@@ -8,12 +8,9 @@ func TestPick(t *testing.T) {
 	taken := make(set)
 	n := 5
 	p := NewPiece(0, n* _16KB)
-	reqs, wanted, pieceDone := pick(taken, p, n, p.len)
+	reqs, wanted := pickBlocks(taken, p, n, p.len)
 	if !wanted {
 		t.Errorf("Expected: peer done")
-	}
-	if !pieceDone{
-		t.Errorf("Expected: piece done")
 	}
 	if len(reqs) != n {
 		t.Errorf("Expected: len(reqs)=%v, Actual: %v", n, len(reqs))

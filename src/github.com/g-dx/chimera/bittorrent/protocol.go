@@ -139,23 +139,18 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 				}
 				// Send chokes
 				for _, p := range chokes {
-					buffers[p.Id()] <- Choke{}
+					buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Choke{} }, p, pieceMap)
 				}
 				// Send unchokes
 				for _, p := range unchokes {
-					buffers[p.Id()] <- Unchoke{}
+					buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Unchoke{} }, p, pieceMap)
 				}
 			}
 
 			// Run piece picking algorithm
 			pp := PickPieces(peers, pieceMap)
 			for p, blocks := range pp {
-				for _, msg := range blocks {
-					// Send, mark as requested & add to pending map
-					buffers[p.Id()] <- msg // TODO: Batch once picker converted.
-					pieceMap.SetBlock(msg.index, msg.begin, REQUESTED)
-					p.blocks.Add(toOffset(msg.index, msg.begin, pieceMap.pieceSize))
-				}
+				buffers[p.Id()] <- OnSendMessages(blocks, p, pieceMap)
 			}
 			tick++
 
@@ -175,7 +170,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 					continue
 				}
 				// Send to net
-				buffers[p.Id()] <- AddMessages(net)
+				buffers[p.Id()] <- OnSendMessages(net, p, pieceMap)
 				// Send to disk
 				for _, msg := range disk {
 					io.dIn <- msg
@@ -188,9 +183,9 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 
 		case e := <-io.pErrs:
 			p := findPeer(e.id, peers)
-			if p != nil {
-				closePeer(p, e.err)
-			}
+            if p != nil {
+                closePeer(p, e.err)
+            }
 
 		case wrapper := <-io.pNew:
 			peers = append(peers, wrapper.p)
@@ -213,7 +208,7 @@ func onDisk(op DiskMessageResult, peers []*Peer, buffers map[PeerIdentity]chan<-
 	case ReadOk:
 		p := findPeer(r.id, peers)
 		if p != nil {
-			buffers[p.Id()] <- r.block
+			buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ r.block }, p, pieceMap)
 			logger.Printf("block [%v, %v] added to peer Q [%v]\n", r.block.index, r.block.begin, r.id)
 		}
 	case WriteOk:
@@ -226,7 +221,7 @@ func onDisk(op DiskMessageResult, peers []*Peer, buffers map[PeerIdentity]chan<-
 
 		// Send haves
 		for _, p := range peers {
-			buffers[p.Id()] <- Have(r)
+			buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Have(r) }, p, pieceMap)
 		}
 
 		// Are we complete?
