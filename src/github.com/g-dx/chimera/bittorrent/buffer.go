@@ -2,6 +2,7 @@ package bittorrent
 
 import (
 	"fmt"
+    "strings"
 )
 
 // ----------------------------------------------------------------------------------
@@ -15,9 +16,17 @@ type AddMessages []ProtocolMessage
 type FilterMessage func(ProtocolMessage) bool
 type CloseMessage struct{}
 
+func (msgs AddMessages) String() string {
+    var s []string
+    for _, m := range msgs {
+        s = append(s, ToString(m))
+    }
+    return "AddMessages (" + strings.Join(s, ", ") + ")"
+}
+
 // Creates a new buffer of the given size. Returns a channel to control
 // the buffer & a downstream channel.
-func Buffer(size int) (chan<- BufferMessage, chan ProtocolMessage) {
+func Buffer(size int) (chan BufferMessage, chan ProtocolMessage) {
 	in := make(chan BufferMessage, size)
 	out := make(chan ProtocolMessage)
 	go bufferImpl(in, out)

@@ -68,7 +68,7 @@ type ProtocolConfig struct {
 
 type PeerWrapper struct {
 	p *Peer
-	in chan<-BufferMessage
+	in chan BufferMessage
 }
 
 func StartProtocol(c ProtocolConfig) error {
@@ -112,7 +112,7 @@ func StartProtocol(c ProtocolConfig) error {
 
 func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *log.Logger) {
 
-	buffers := make(map[PeerIdentity]chan<-BufferMessage)
+	buffers := make(map[PeerIdentity]chan BufferMessage)
 	peers := make([]*Peer, 0, idealPeers)
 	isSeed := pieceMap.IsComplete()
 	tick := 0
@@ -121,37 +121,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 
 		select {
 		case <-io.tick:
-			// Update peer stats
-			for _, p := range peers {
-				p.Stats().Update()
-			}
-
-			// Run choking algorithm
-			if tick%chokeInterval == 0 {
-				old, new, chokes, unchokes := ChokePeers(isSeed, peers, tick%optimisticChokeInterval == 0)
-				// Clear old optimistic
-				if old != nil {
-					old.ws = old.ws.NotOptimistic()
-				}
-				// Set new optimistic
-				if new != nil {
-					new.ws = new.ws.Optimistic()
-				}
-				// Send chokes
-				for _, p := range chokes {
-					buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Choke{} }, p, pieceMap)
-				}
-				// Send unchokes
-				for _, p := range unchokes {
-					buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Unchoke{} }, p, pieceMap)
-				}
-			}
-
-			// Run piece picking algorithm
-			pp := PickPieces(peers, pieceMap)
-			for p, blocks := range pp {
-				buffers[p.Id()] <- OnSendMessages(blocks, p, pieceMap)
-			}
+			OnTick(tick, peers, buffers, isSeed, pieceMap)
 			tick++
 
 		case r := <-io.trOut:
@@ -199,7 +169,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 }
 
 // TODO: This function should be broken down into onWriteOk(...), onReadOk(...) and the switch on type moved to the main loop
-func onDisk(op DiskMessageResult, peers []*Peer, buffers map[PeerIdentity]chan<-BufferMessage, logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
+func onDisk(op DiskMessageResult, peers []*Peer, buffers map[PeerIdentity]chan BufferMessage, logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
 	switch r := op.(type) {
 	case ReadOk:
 		p := findPeer(r.id, peers)
@@ -307,4 +277,37 @@ func findPeer(id PeerIdentity, peers []*Peer) *Peer {
 		}
 	}
 	return nil
+}
+
+func OnTick(tick int, peers []*Peer, buffers map[PeerIdentity]chan BufferMessage, isSeed bool, mp *PieceMap) {
+    for _, p := range peers {
+        p.Stats().Update()
+    }
+
+    // Run choking algorithm
+    if tick%chokeInterval == 0 {
+        old, new, chokes, unchokes := ChokePeers(isSeed, peers, tick%optimisticChokeInterval == 0)
+        // Clear old optimistic
+        if old != nil {
+            old.ws = old.ws.NotOptimistic()
+        }
+        // Set new optimistic
+        if new != nil {
+            new.ws = new.ws.Optimistic()
+        }
+        // Send chokes
+        for _, p := range chokes {
+            buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Choke{} }, p, mp)
+        }
+        // Send unchokes
+        for _, p := range unchokes {
+            buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Unchoke{} }, p, mp)
+        }
+    }
+
+    // Run piece picking algorithm
+    pp := PickPieces(peers, mp)
+    for p, blocks := range pp {
+        buffers[p.Id()] <- OnSendMessages(blocks, p, mp)
+    }
 }
