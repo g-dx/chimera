@@ -18,7 +18,7 @@ const (
 // | 7      | 6      | 5           | 4       | 3          | 2      | 1          | 0   |
 // | Unused | Unused | interesting | choking | interested | choked | optimistic | new |
 // | 0      | 0      | 0           | 1       | 0          | 1      | 0          | 1   |
-const initWireState = WireState(0x15)
+const ws = WireState(0x15)
 
 type WireState byte
 

@@ -24,7 +24,7 @@ func NewPeer(id PeerIdentity, noOfPieces int) *Peer {
 
 	return &Peer{
 		id:         id,
-		ws:         initWireState,
+		ws:         ws,
 		bitfield:   NewBitSet(noOfPieces),
 		statistics: NewStatistics(),
 		blocks: make(set),

@@ -14,7 +14,6 @@ var none = "<none>"
 func BenchmarkChokePeers10(b *testing.B) {
 
 	// Build a collection of peers in different states
-	ws := initWireState
 	peers := ps{
 		p1(1, ws.NotChoking()),
 		p2(2, ws.Interested()),
@@ -33,7 +32,6 @@ func BenchmarkChokePeers10(b *testing.B) {
 
 func TestBuildCandidates(t *testing.T) {
 
-	ws := initWireState
 	tests := []struct {
 		ps ps
 		curOpt string
@@ -65,7 +63,6 @@ func TestBuildCandidates(t *testing.T) {
 func TestChokePeers(t *testing.T) {
 
 	// Init download & upload rate & wire state
-	ws := initWireState
 	tests := []struct {
 		ps ps
 		changeOpt bool

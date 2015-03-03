@@ -3,8 +3,6 @@ import "testing"
 
 func TestOnTick(t *testing.T) {
 
-    ws := initWireState
-
     tick := 10 // Choke & Pick
     p1 := p1(10, ws.Interested())
     p2 := p2(20, ws.Interested())
