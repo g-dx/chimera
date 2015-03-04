@@ -40,7 +40,6 @@ func TestNewRegularPiece(t *testing.T) {
 
 	// Requests 1 - 10
 	for j, req := range r {
-		t.Logf("%v", req)
 		intEquals(t, i, req.index)
 		intEquals(t, _16KB*j, req.begin)
 		intEquals(t, _16KB, req.length)

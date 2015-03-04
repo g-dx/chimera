@@ -1,6 +1,9 @@
 package bittorrent
 
-import "testing"
+import (
+    "testing"
+    "reflect"
+)
 
 
 func TestPick(t *testing.T) {
@@ -36,23 +39,21 @@ func TestPickPieces(t *testing.T) {
 
 	// Build a collection of peers in different states
 	// Peers 2, 4 & 10 are eligible for piece picking
-	p1 := per(1, pm).dl(1)
-	p2 := per(2, pm).dl(2).with(pm, Bitfield([]byte{0xE0}), Unchoke{})
-	p3 := per(3, pm)
-	p4 := per(4, pm).dl(4).with(pm, Bitfield([]byte{0xE0}), Unchoke{})
-	p5 := per(5, pm).dl(5)
-	p6 := per(6, pm)
-	p7 := per(7, pm).dl(7).with(pm, Unchoke{})
-	p8 := per(8, pm).dl(8)
-	p9 := per(9, pm).dl(9).with(pm, Interested{})
-	p10 := per(10, pm).dl(10).with(pm, Bitfield([]byte{0xE0}), Unchoke{})
-	peers := asList(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10)
-
+	p1 := p1(1, ws)
+	p2 := withMsgs(p2(2, ws), pm, Bitfield([]byte{0xE0}), Unchoke{})
+	p3 := p3(3, ws)
+	p4 := withMsgs(p4(4, ws), pm, Bitfield([]byte{0xE0}), Unchoke{})
+	p5 := p5(5, ws)
+	p6 := p6(6, ws)
+	p7 := withMsgs(p7(7, ws), pm, Unchoke{})
+	p8 := p8(8, ws)
+	p9 := p9(9, ws.Interested())
+	p10 := withMsgs(p10(10, ws), pm, Bitfield([]byte{0xE0}), Unchoke{})
 
 	// Pick pieces
-	picked := PickPieces(peers, pm)
+	picked := PickPieces([]*Peer { p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 }, pm)
 
-	testData := map[*TestPeer][]ProtocolMessage {
+	testData := map[*Peer][]ProtocolMessage {
 		 p1: []ProtocolMessage{},
 		 p3: []ProtocolMessage{},
 		 p5: []ProtocolMessage{},
@@ -98,26 +99,10 @@ func TestPickPieces(t *testing.T) {
 		},
 	}
 
-	t.Logf("%v", picked)
-
-	for p, actualMsgs := range picked {
-		expectedMsgs := getExpected(p, testData)
-			for i, actualMsg := range actualMsgs {
-				actual := ToString(actualMsg)
-				expected := ToString(expectedMsgs[i])
-				if actual != expected {
-					t.Errorf("\nPeer: %v\nExpected: %v\nActual  : %v",
-						p.Id(), expected, actual)
-				}
-			}
-	}
-}
-
-func getExpected(p *Peer, testData map[*TestPeer][]ProtocolMessage) []ProtocolMessage {
-	for key, value := range testData {
-		if key.Peer.Id() == p.Id() {
-			return value
-		}
-	}
-	return nil
+	for p, got := range picked {
+        wanted := testData[p]
+        if !reflect.DeepEqual(got, wanted) {
+            t.Errorf("\nPeer: %v, \nWanted: %v\nGot   : %v", p.Id(), wanted, got)
+        }
+    }
 }

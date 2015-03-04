@@ -2,7 +2,6 @@ package bittorrent
 
 import (
 	"fmt"
-	"strconv"
 	"testing"
 	"strings"
 )
@@ -259,49 +258,6 @@ func containsPeers(expected []PeerIdentity, actual []PeerIdentity) (notFound []s
 	return notFound, notExpected
 }
 
-type TestPeer struct {
-	*Peer
-	out chan ProtocolMessage
-}
-
-func (tp *TestPeer) with(mp *PieceMap, msgs ...ProtocolMessage) *TestPeer {
-	err, _, _ := OnReceiveMessages(msgs, tp.Peer, mp)
-	if err != nil {
-		panic(err)
-	}
-	return tp
-}
-
-func (tp *TestPeer) dl(rate int) *TestPeer {
-	tp.Stats().Download.rate = rate
-	tp.ws = tp.ws.NotNew()
-	return tp
-}
-
-func (tp *TestPeer) ul(rate int) *TestPeer {
-	tp.Stats().Upload.rate = rate
-	tp.ws = tp.ws.NotNew()
-	return tp
-}
-
-func (tp *TestPeer) asPeer() *Peer {
-	return tp.Peer
-}
-
-func per(i int, pm *PieceMap) *TestPeer {
-	out := make(chan ProtocolMessage)
-	p := NewPeer(PeerIdentity(strconv.Itoa(i)), len(pm.pieces))
-	return &TestPeer{p, out}
-}
-
-func asList(tps ...*TestPeer) []*Peer {
-	ps := make([]*Peer, 0, len(tps))
-	for _, p := range tps {
-		ps = append(ps, p.asPeer())
-	}
-	return ps
-}
-
 func withMsgs(p *Peer, mp *PieceMap, msgs...ProtocolMessage) *Peer {
     err, _, _ := OnReceiveMessages(msgs, p, mp)
     if err != nil {
@@ -318,11 +274,13 @@ func p5(rate int, ws WireState) *Peer { return p("p5", rate, ws) }
 func p6(rate int, ws WireState) *Peer { return p("p6", rate, ws) }
 func p7(rate int, ws WireState) *Peer { return p("p7", rate, ws) }
 func p8(rate int, ws WireState) *Peer { return p("p8", rate, ws) }
+func p9(rate int, ws WireState) *Peer { return p("p9", rate, ws) }
+func p10(rate int, ws WireState) *Peer { return p("p10", rate, ws) }
 
 func p(id string, rate int, ws WireState) *Peer {
-	p := NewPeer(PeerIdentity(id), 0) // No of pieces not important
-	p.ws = ws
-	p.Stats().Download.rate = rate
-	p.Stats().Upload.rate = rate
-	return p
+    p := NewPeer(PeerIdentity(id), 0) // No of pieces not important
+    p.ws = ws
+    p.Stats().Download.rate = rate
+    p.Stats().Upload.rate = rate
+    return p
 }
