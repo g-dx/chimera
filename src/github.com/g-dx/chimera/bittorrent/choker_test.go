@@ -264,36 +264,6 @@ type TestPeer struct {
 	out chan ProtocolMessage
 }
 
-func (tp *TestPeer) notChoking() *TestPeer {
-	tp.ws = tp.ws.NotChoking()
-	return tp
-}
-
-func (tp *TestPeer) choking() *TestPeer {
-	tp.ws = tp.ws.Choking()
-	return tp
-}
-
-func (tp *TestPeer) interesting() *TestPeer {
-	tp.ws = tp.ws.Interesting()
-	return tp
-}
-
-func (tp *TestPeer) notInteresting() *TestPeer {
-	tp.ws = tp.ws.NotInteresting()
-	return tp
-}
-
-func (tp *TestPeer) interested() *TestPeer {
-	tp.ws = tp.ws.Interested().NotNew()
-	return tp
-}
-
-func (tp *TestPeer) uninterested() *TestPeer {
-	tp.ws = tp.ws.NotInterested()
-	return tp
-}
-
 func (tp *TestPeer) with(mp *PieceMap, msgs ...ProtocolMessage) *TestPeer {
 	err, _, _ := OnReceiveMessages(msgs, tp.Peer, mp)
 	if err != nil {
