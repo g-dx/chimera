@@ -196,7 +196,7 @@ func (p *Piece) Complete() {
 }
 
 func (p *Piece) Reset() {
-    for i, s := range p.blocks {
+    for i, _ := range p.blocks {
         p.blocks[i] = NEEDED
     }
 	p.state = NOT_STARTED
