@@ -10,6 +10,7 @@ import (
 	"crypto/sha1"
 	"net"
 	"time"
+    "strings"
 )
 
 const MaxInt = ^uint(0) >> 1
@@ -62,10 +63,20 @@ func Msgs(msgs ...ProtocolMessage) MsgList {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
-// Basic message
+// Basic message & wrapper
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 type ProtocolMessage interface {
+}
+
+type ProtocolMessages []ProtocolMessage
+
+func (pm ProtocolMessages) String() string {
+    var s []string
+    for _, m := range pm {
+        s = append(s, ToString(m))
+    }
+    return "[" + strings.Join(s, ", ") + "]"
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////

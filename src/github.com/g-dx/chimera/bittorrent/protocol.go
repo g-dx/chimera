@@ -110,18 +110,30 @@ func StartProtocol(c ProtocolConfig) error {
 	return err
 }
 
-func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *log.Logger) {
+func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Logger) {
 
 	buffers := make(map[PeerIdentity]chan BufferMessage)
 	peers := make([]*Peer, 0, idealPeers)
-	isSeed := pieceMap.IsComplete()
+	isSeed := mp.IsComplete()
 	tick := 0
+
+    // Define function for socket send
+    toSocket := func(p *Peer, msgs []ProtocolMessage) {
+        buffers[p.Id()] <- OnSendMessages(msgs, p, mp) // TODO: Externalise
+    }
+
+    // Define function for disk send
+    toDisk := func(p *Peer, msgs []DiskMessage) {
+        for _, msg := range msgs {
+            io.dIn <- msg
+        }
+    }
 
 	for {
 
 		select {
 		case <-io.tick:
-			OnTick(tick, peers, buffers, isSeed, pieceMap)
+			onTick(tick, peers, toSocket, isSeed, mp)
 			tick++
 
 		case r := <-io.trOut:
@@ -133,18 +145,10 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 		case list := <-io.pMsgs:
 			p := findPeer(list.id, peers)
 			if p != nil {
-				// Process all messages
-				err, net, disk := OnReceiveMessages(list.msgs, p, pieceMap)
-				if err != nil {
-					closePeer(p, err)
-					continue
-				}
-				// Send to net
-				buffers[p.Id()] <- OnSendMessages(net, p, pieceMap)
-				// Send to disk
-				for _, msg := range disk {
-					io.dIn <- msg
-				}
+				err := onProtocolMessages(p, list.msgs, toSocket, toDisk, mp)
+                if err != nil {
+                    closePeer(p, err)
+                }
 			}
 
 		case e := <-io.pErrs:
@@ -158,7 +162,7 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 			buffers[wrapper.p.Id()] = wrapper.in
 
 		case d := <-io.dOut:
-			onDisk(d, peers, buffers, logger, pieceMap, io.complete)
+			onDisk(d, peers, toSocket, logger, mp, io.complete)
 
 		case conn := <-io.pConns:
 			if len(peers) < idealPeers {
@@ -168,13 +172,12 @@ func protocolLoop(c ProtocolConfig, pieceMap *PieceMap, io ProtocolIO, logger *l
 	}
 }
 
-// TODO: This function should be broken down into onWriteOk(...), onReadOk(...) and the switch on type moved to the main loop
-func onDisk(op DiskMessageResult, peers []*Peer, buffers map[PeerIdentity]chan BufferMessage, logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
+func onDisk(op DiskMessageResult, peers []*Peer, toSocket func(*Peer, []ProtocolMessage), logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
 	switch r := op.(type) {
 	case ReadOk:
 		p := findPeer(r.id, peers)
 		if p != nil {
-			buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ r.block }, p, pieceMap)
+			toSocket(p, []ProtocolMessage{ r.block })
 			logger.Printf("block [%v, %v] added to peer Q [%v]\n", r.block.index, r.block.begin, r.id)
 		}
 	case WriteOk:
@@ -187,7 +190,7 @@ func onDisk(op DiskMessageResult, peers []*Peer, buffers map[PeerIdentity]chan B
 
 		// Send haves
 		for _, p := range peers {
-			buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Have(r) }, p, pieceMap)
+			toSocket(p, []ProtocolMessage{ Have(r) })
 		}
 
 		// Are we complete?
@@ -279,7 +282,9 @@ func findPeer(id PeerIdentity, peers []*Peer) *Peer {
 	return nil
 }
 
-func OnTick(tick int, peers []*Peer, buffers map[PeerIdentity]chan BufferMessage, isSeed bool, mp *PieceMap) {
+func onTick(tick int, peers []*Peer, send func(*Peer, []ProtocolMessage), isSeed bool, mp *PieceMap) {
+
+    // Update stats
     for _, p := range peers {
         p.Stats().Update()
     }
@@ -297,17 +302,31 @@ func OnTick(tick int, peers []*Peer, buffers map[PeerIdentity]chan BufferMessage
         }
         // Send chokes
         for _, p := range chokes {
-            buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Choke{} }, p, mp)
+            send(p, []ProtocolMessage{ Choke{} })
         }
         // Send unchokes
         for _, p := range unchokes {
-            buffers[p.Id()] <- OnSendMessages([]ProtocolMessage{ Unchoke{} }, p, mp)
+            send(p, []ProtocolMessage{ Unchoke{} })
         }
     }
 
     // Run piece picking algorithm
     pp := PickPieces(peers, mp)
     for p, blocks := range pp {
-        buffers[p.Id()] <- OnSendMessages(blocks, p, mp)
+        send(p, blocks)
     }
+}
+
+func onProtocolMessages(p *Peer, msgs []ProtocolMessage,
+                        toSocket func(*Peer, []ProtocolMessage),
+                        toDisk func(*Peer, []DiskMessage), mp *PieceMap) error {
+    // Process all messages
+    err, net, disk := OnReceiveMessages(msgs, p, mp)
+    if err != nil {
+        return err
+    }
+    // Send
+    toSocket(p, net)
+    toDisk(p, disk)
+    return nil
 }

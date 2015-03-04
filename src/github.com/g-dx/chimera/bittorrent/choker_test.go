@@ -332,6 +332,14 @@ func asList(tps ...*TestPeer) []*Peer {
 	return ps
 }
 
+func withMsgs(p *Peer, mp *PieceMap, msgs...ProtocolMessage) *Peer {
+    err, _, _ := OnReceiveMessages(msgs, p, mp)
+    if err != nil {
+        panic(err)
+    }
+    return p
+}
+
 func p1(rate int, ws WireState) *Peer { return p("p1", rate, ws) }
 func p2(rate int, ws WireState) *Peer { return p("p2", rate, ws) }
 func p3(rate int, ws WireState) *Peer { return p("p3", rate, ws) }
