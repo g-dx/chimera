@@ -182,20 +182,23 @@ func (p *Piece) Priority() int {
 }
 
 // Are there blocks still to be requested?
-func (p Piece) RequestsRequired() bool {
+func (p *Piece) RequestsRequired() bool {
 	return p.state == NOT_STARTED || p.state == BLOCKS_NEEDED
 }
 
 // Have all blocks been requested?
-func (p Piece) FullyRequested() bool {
+func (p *Piece) FullyRequested() bool {
 	return p.state == FULLY_REQUESTED
 }
 
-func (p Piece) Complete() {
+func (p *Piece) Complete() {
 	p.state = COMPLETE
 }
 
-func (p Piece) Reset() {
+func (p *Piece) Reset() {
+    for i, s := range p.blocks {
+        p.blocks[i] = NEEDED
+    }
 	p.state = NOT_STARTED
 }
 
