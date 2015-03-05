@@ -129,6 +129,13 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
         }
     }
 
+    // Define broadcast
+    broadcast := func(pm ProtocolMessage) {
+        for _, buffer := range buffers {
+            buffer <- pm
+        }
+    }
+
 	for {
 
 		select {
@@ -143,17 +150,15 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
 			}
 
 		case list := <-io.pMsgs:
-			p := findPeer(list.id, peers)
-			if p != nil {
-				err := onProtocolMessages(p, list.msgs, toSocket, toDisk, mp)
+			if ok, p := findPeer(list.id, peers); ok {
+                err := onProtocolMessages(p, list.msgs, toSocket, toDisk, mp)
                 if err != nil {
                     closePeer(p, err)
                 }
-			}
+            }
 
 		case e := <-io.pErrs:
-			p := findPeer(e.id, peers)
-            if p != nil {
+            if ok, p := findPeer(e.id, peers); ok {
                 closePeer(p, e.err)
             }
 
@@ -161,8 +166,22 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
 			peers = append(peers, wrapper.p)
 			buffers[wrapper.p.Id()] = wrapper.in
 
-		case d := <-io.dOut:
-			onDisk(d, peers, toSocket, logger, mp, io.complete)
+		case m := <-io.dOut:
+            switch msg := m.(type) {
+                case ReadOk:
+                    if ok, p := findPeer(msg.id, peers); ok {
+                        onReadOk(msg.block, p, toSocket)
+                    }
+                case HashFailed:
+                    onHashFailed(int(msg), mp)
+                case PieceOk:
+                    onPieceOk(int(msg), mp, broadcast, io.complete, logger)
+                case ErrorResult:
+                    onErrorResult(logger, msg.op, msg.err)
+                case WriteOk: // Nothing to do...
+                default:
+                    logger.Printf("Unknown Disk Message: %v", msg)
+            }
 
 		case conn := <-io.pConns:
 			if len(peers) < idealPeers {
@@ -172,38 +191,27 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
 	}
 }
 
-func onDisk(op DiskMessageResult, peers []*Peer, toSocket func(*Peer, []ProtocolMessage), logger *log.Logger, pieceMap *PieceMap, complete chan struct{}) {
-	switch r := op.(type) {
-	case ReadOk:
-		p := findPeer(r.id, peers)
-		if p != nil {
-			toSocket(p, []ProtocolMessage{ r.block })
-			logger.Printf("block [%v, %v] added to peer Q [%v]\n", r.block.index, r.block.begin, r.id)
-		}
-	case WriteOk:
-		// Nothing to do
-	case PieceOk:
-		logger.Printf("piece [%v] written to disk\n", r)
+func onReadOk(b Block, p *Peer, toSocket func(*Peer, []ProtocolMessage)) {
+    toSocket(p, []ProtocolMessage{ b })
+}
 
-		// Mark piece as complete
-		pieceMap.Get(int(r)).Complete()
+func onHashFailed(index int, mp *PieceMap) {
+    mp.Piece(index).Reset()
+}
 
-		// Send haves
-		for _, p := range peers {
-			toSocket(p, []ProtocolMessage{ Have(r) })
-		}
+func onErrorResult(l *log.Logger, op string, err error) {
+    l.Panicf("Disk [%v] Failed: %v\n", op, err)
+}
 
-		// Are we complete?
-		if pieceMap.IsComplete() {
-			close(complete) // Yay!
-		}
-	case HashFailed:
-		// Reset piece
-		pieceMap.Get(int(r)).Reset()
+func onPieceOk(index int, mp *PieceMap, broadcast func(ProtocolMessage), complete chan struct{}, l *log.Logger) {
 
-	case ErrorResult:
-		logger.Panicf("Disk [%v] Failed: %v\n", r.op, r.err)
-	}
+    l.Printf("piece [%v] written to disk\n", index)
+    mp.Get(index).Complete()
+    broadcast(Have(index))
+
+    if mp.IsComplete() {
+        close(complete) // Complete! Yay!
+    }
 }
 
 func onTrackerResponse(r *TrackerResponse, peerCount int) []PeerAddress {
@@ -273,13 +281,13 @@ func maybeConnect(r chan<- PeerConnectResult) {
 //	}
 }
 
-func findPeer(id PeerIdentity, peers []*Peer) *Peer {
+func findPeer(id PeerIdentity, peers []*Peer) (bool, *Peer) {
 	for _, p := range peers {
 		if p.Id() == id {
-			return p
+			return true, p
 		}
 	}
-	return nil
+	return false, nil
 }
 
 func onTick(tick int, peers []*Peer, send func(*Peer, []ProtocolMessage), isSeed bool, mp *PieceMap) {
