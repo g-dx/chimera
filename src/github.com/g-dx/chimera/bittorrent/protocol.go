@@ -129,10 +129,11 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
         }
     }
 
-    // Define broadcast
-    broadcast := func(pm ProtocolMessage) {
-        for _, buffer := range buffers {
-            buffer <- pm
+    // Define function for socket broadcast
+    toAllSockets := func(pm ProtocolMessage) {
+        for id, buffer := range buffers {
+            _, p := findPeer(id, peers)
+            buffer <- OnSendMessages([]ProtocolMessage{ pm }, p, mp) // TODO: Externalise
         }
     }
 
@@ -175,7 +176,7 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
                 case HashFailed:
                     onHashFailed(int(msg), mp)
                 case PieceOk:
-                    onPieceOk(int(msg), mp, broadcast, io.complete, logger)
+                    onPieceOk(int(msg), mp, toAllSockets, io.complete, logger)
                 case ErrorResult:
                     onErrorResult(logger, msg.op, msg.err)
                 case WriteOk: // Nothing to do...
@@ -203,11 +204,11 @@ func onErrorResult(l *log.Logger, op string, err error) {
     l.Panicf("Disk [%v] Failed: %v\n", op, err)
 }
 
-func onPieceOk(index int, mp *PieceMap, broadcast func(ProtocolMessage), complete chan struct{}, l *log.Logger) {
+func onPieceOk(index int, mp *PieceMap, toAllSockets func(ProtocolMessage), complete chan struct{}, l *log.Logger) {
 
     l.Printf("piece [%v] written to disk\n", index)
     mp.Get(index).Complete()
-    broadcast(Have(index))
+    toAllSockets(Have(index))
 
     if mp.IsComplete() {
         close(complete) // Complete! Yay!
