@@ -59,21 +59,18 @@ func TestOnPieceOk(t *testing.T) {
         mp.Piece(i).Complete()
     }
 
-    p1 := p1(10, ws)
-    p2 := p2(20, ws)
     c := make(chan struct{})
 
-    wanted := map[PeerIdentity]ProtocolMessages {
-        p1.Id() : ProtocolMessages { Have(0) },
-        p2.Id() : ProtocolMessages { Have(0) },
-    }
-
+    wanted := ProtocolMessages { Have(0) }
     recv, got := testBroadcastAndReceiver()
 
     onPieceOk(0, mp, recv, c, devNull)
 
-    // Check for haves
-    assertReceivedMessages(t, got, wanted)
+    // Check broadcast messages
+    // NOTE: Explicit pointer dereference!
+    if !reflect.DeepEqual(wanted, *got) {
+        t.Errorf("\nWanted: %v\nGot   : %v", wanted, got)
+    }
 
     // Check marked as complete
     if !mp.IsComplete() {
@@ -106,12 +103,12 @@ func testSendAndReceiver() (func(p *Peer, msgs []ProtocolMessage), map[PeerIdent
     return f, got
 }
 
-func testBroadcastAndReceiver() (func(msg ProtocolMessage), ProtocolMessages) {
+func testBroadcastAndReceiver() (func(msg ProtocolMessage), *ProtocolMessages) {
     var msgs ProtocolMessages
     f := func(msg ProtocolMessage) {
         msgs = append(msgs, msg)
     }
-    return f, msgs
+    return f, &msgs
 }
 
 
