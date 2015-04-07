@@ -274,14 +274,6 @@ func closePeer(peer *Peer, err error) {
 	// 3. Log errors
 }
 
-func maybeConnect(r chan<- PeerConnectResult) {
-
-//	peerCount := len(ph.peers)
-//	if peerCount < idealPeers {
-//		// TODO: fix me!
-//	}
-}
-
 func findPeer(id PeerIdentity, peers []*Peer) (bool, *Peer) {
 	for _, p := range peers {
 		if p.Id() == id {
