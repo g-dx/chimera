@@ -65,6 +65,15 @@ func (bs BitSet) IsValid(i int) bool {
 	return i >= 0 && i < bs.size
 }
 
+func (bs *BitSet) Contains(b *BitSet) bool {
+	for i, v := range bs.bits {
+		if (v ^ b.bits[i]) | v  == v {
+			return false
+		}
+	}
+	return true
+}
+
 func (bs *BitSet) IsComplete() bool {
 
 	// Fast path
