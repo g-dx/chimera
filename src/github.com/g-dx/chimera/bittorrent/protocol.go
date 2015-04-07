@@ -14,12 +14,6 @@ const (
 	oneSecond 				= 1 * time.Second
 )
 
-type PeerConnectResult struct {
-	peer *Peer
-	err  error
-	ok   bool
-}
-
 // Various I/O channels for the protocol
 type ProtocolIO struct {
 	pNew   chan PeerWrapper
