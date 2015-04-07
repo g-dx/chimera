@@ -15,8 +15,6 @@ var (
 	keepAlivePeriod     = 1 * time.Minute
 	DIAL_TIMEOUT        = 10 * time.Second
 	handshakeTimeout    = 5 * time.Second
-	ONE_HUNDRED_MILLIS  = 100 * time.Millisecond
-	FIVE_HUNDRED_MILLIS = 5 * ONE_HUNDRED_MILLIS
 
 	oneMegaByte      = 1 * 1024 * 1024
 	fiveHundredMills = 500 * time.Millisecond
@@ -253,7 +251,7 @@ type OutgoingPeerConnection struct {
 func (oc *OutgoingPeerConnection) loop(buf *bytes.Buffer, err chan<- PeerError, id PeerIdentity) {
 	defer onLoopExit(err, id)
 	keepAlive := time.After(keepAlivePeriod)
-	flushTimer := time.Tick(FIVE_HUNDRED_MILLIS)
+	flushTimer := time.Tick(fiveHundredMills)
 
 	b := make([]byte, _16KB+13) // Max size = Block(_16Kb)
 	for {
