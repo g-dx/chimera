@@ -7,15 +7,11 @@ import (
 	"io"
 )
 
-var (
-	FIFTY_MILLISECONDS = 50 * time.Millisecond
-	oneSecond = 1 * time.Second
-)
-
 const (
 	chokeInterval           = 10
 	optimisticChokeInterval = 30
 	idealPeers              = 25
+	oneSecond 				= 1 * time.Second
 )
 
 type PeerConnectResult struct {
