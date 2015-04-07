@@ -45,13 +45,13 @@ func createTestPeerConnections(t testing.TB) (*PeerConnection, *PeerConnection) 
 	defer close(res)
 	go func() {
 		pc := <-c
-		establish(pc, infoHash, t)
+		establishAndStart(pc, infoHash, t)
 		res <- pc
 	}()
 
 	// Open & establish "sending" side
 	pc := open(laddr, t)
-	establish(pc, infoHash, t)
+	establishAndStart(pc, infoHash, t)
 
 	// Return all parts
 	return <-res, pc
@@ -65,10 +65,10 @@ func open(laddr string, t testing.TB) *PeerConnection {
 	return pc
 }
 
-func establish(pc *PeerConnection, infoHash []byte, t testing.TB) {
-	_, err := pc.Establish(make(chan ProtocolMessage), make(chan *MessageList), make(chan PeerError),
-		Handshake(infoHash), ioutil.Discard, true)
+func establishAndStart(pc *PeerConnection, infoHash []byte, t testing.TB) {
+	id, err := pc.Establish(Handshake(infoHash), true)
 	if err != nil {
 		t.Fatalf("Failed to establish connection: %v", err)
 	}
+	pc.Start(id, make(chan ProtocolMessage), make(chan *MessageList), make(chan PeerError), ioutil.Discard)
 }

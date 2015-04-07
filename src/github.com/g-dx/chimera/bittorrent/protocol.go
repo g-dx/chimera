@@ -68,7 +68,7 @@ type ProtocolConfig struct {
 
 type PeerWrapper struct {
 	p *Peer
-	in chan BufferMessage
+	c *PeerConnection
 }
 
 func StartProtocol(c ProtocolConfig) error {
@@ -164,8 +164,22 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
             }
 
 		case wrapper := <-io.pNew:
+
+			// TODO: The connection has been passed here and we should hang on to it!
+
+			// Create log file & loggers
+			err, file := c.w(fmt.Sprintf("%v.log", wrapper.c.in.conn.RemoteAddr()))
+			if err != nil {
+				logger.Fatalf("Can't create log file: [%v]\n", err)
+			}
+
+			// Create outgoing buffer & start connection
+			in, out := Buffer(c.peerOutgoingBufferSize)
+			wrapper.c.Start(wrapper.p.Id(), out, io.pMsgs, io.pErrs, file)
+
+			// Store
 			peers = append(peers, wrapper.p)
-			buffers[wrapper.p.Id()] = wrapper.in
+			buffers[wrapper.p.Id()] = in
 
 		case m := <-io.dOut:
             switch msg := m.(type) {
@@ -242,18 +256,8 @@ func handlePeerConnect(addr PeerAddress, c ProtocolConfig, logger *log.Logger, i
 
 func handlePeerEstablish(conn *PeerConnection, c ProtocolConfig, logger *log.Logger, io ProtocolIO, outgoing bool) {
 
-	// Create log file & create loggers
-	err, file := c.w(fmt.Sprintf("%v.log", conn.in.conn.RemoteAddr()))
-	if err != nil {
-		logger.Printf("Can't create log file: [%v]\n", err)
-		conn.Close()
-		return
-	}
-
-	in, out := Buffer(c.peerOutgoingBufferSize)
-
 	// Attempt to establish connection
-	id, err := conn.Establish(out, io.pMsgs, io.pErrs, Handshake(c.mi.InfoHash), file, outgoing)
+	id, err := conn.Establish(Handshake(c.mi.InfoHash), outgoing)
 	if err != nil {
 		logger.Printf("Can't establish connection [%v]: %v\n", conn.in.conn.RemoteAddr(), err)
 		conn.Close()
@@ -262,7 +266,7 @@ func handlePeerEstablish(conn *PeerConnection, c ProtocolConfig, logger *log.Log
 
 	// Connected
 	logger.Printf("New Peer: %v\n", id)
-	io.pNew <- PeerWrapper{NewPeer(id, len(c.mi.Hashes)), in}
+	io.pNew <- PeerWrapper{NewPeer(id, len(c.mi.Hashes)), conn}
 }
 
 func closePeer(peer *Peer, err error) {

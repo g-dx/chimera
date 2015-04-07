@@ -87,16 +87,7 @@ func createConnection(conn net.Conn) *PeerConnection {
 	}
 }
 
-func (pc *PeerConnection) Establish(in chan ProtocolMessage,
-	out chan *MessageList,
-	e chan<- PeerError,
-	handshake *HandshakeMessage,
-	w io.Writer,
-	outgoing bool) (PeerIdentity, error) {
-
-	pc.in.log = log.New(w, " in  ->", log.Ldate|log.Ltime)
-	pc.out.logger = log.New(w, " out <-"+pc.in.conn.RemoteAddr().String()+" => ", log.Ldate|log.Ltime|log.Lmicroseconds)
-	pc.logger = log.New(w, "  -  --"+pc.in.conn.RemoteAddr().String()+" => ", log.Ldate|log.Ltime|log.Lmicroseconds)
+func (pc *PeerConnection) Establish(handshake *HandshakeMessage, outgoing bool) (PeerIdentity, error) {
 
 	// Ensure we handshake properly
 	id, err := pc.completeHandshake(handshake, outgoing)
@@ -104,13 +95,21 @@ func (pc *PeerConnection) Establish(in chan ProtocolMessage,
 		pc.logger.Println(err)
 		return nilPeerId, err
 	}
+	return id, nil
+}
+
+func (pc *PeerConnection) Start(id PeerIdentity, in chan ProtocolMessage, out chan *MessageList, e chan<- PeerError, w io.Writer) {
+
+	pc.in.log = log.New(w, " in  ->", log.Ldate|log.Ltime)
+	pc.out.logger = log.New(w, " out <-"+pc.in.conn.RemoteAddr().String()+" => ", log.Ldate|log.Ltime|log.Lmicroseconds)
+	pc.logger = log.New(w, "  -  --"+pc.in.conn.RemoteAddr().String()+" => ", log.Ldate|log.Ltime|log.Lmicroseconds)
 
 	// Connect up channels
 	pc.in.c = out
 	pc.out.c = in
 
 	// Create buffers
-	// TODO: Rationalise these values
+	// TODO: These values should come from parameter config
 	inBuf := bytes.NewBuffer(make([]byte, 0, oneMegaByte))
 	outBuf := bytes.NewBuffer(make([]byte, 0, _160KB))
 
@@ -118,8 +117,7 @@ func (pc *PeerConnection) Establish(in chan ProtocolMessage,
 	go pc.in.loop(inBuf, e, id)
 	go pc.out.loop(outBuf, e, id)
 
-	pc.logger.Println("Established")
-	return id, nil
+	pc.logger.Println("Started")
 }
 
 func (pc *PeerConnection) completeHandshake(handshake *HandshakeMessage, outgoing bool) (pi PeerIdentity, err error) {
