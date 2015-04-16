@@ -14,9 +14,81 @@ const (
 	oneSecond 				= 1 * time.Second
 )
 
+// ------------------------------------------------------------------------------------
+
+type addressPool map[string]struct{}
+
+func (p addressPool) Has(id string) bool {
+	_, ok := p[id]
+	return ok
+}
+
+func (p addressPool) Add(id string) {
+	p[id] = struct{}{}
+}
+
+func (p addressPool) Get() string {
+	for id, _ := range p {
+		delete(p, id)
+		return id
+	}
+	panic("Address pool is empty!")
+}
+
+func (p addressPool) IsEmpty() bool {
+	return len(p) > 0
+}
+
+// ------------------------------------------------------------------------------------
+
+type addressPools struct {
+	used addressPool   // Connected at least
+	new addressPool    // Not tried
+}
+
+func NewAddressPools() addressPools {
+	return addressPools{ make(addressPool), make(addressPool) }
+}
+
+func (p * addressPools) Used(addr string) {
+	p.used.Add(addr)
+}
+
+// Called to handle tracker response
+func (p * addressPools) Add(addrs []PeerAddress) {
+	for _, addr := range addrs {
+		if !p.used.Has(addr.GetIpAndPort()) {
+			p.new.Add(addr.GetIpAndPort())
+		}
+	}
+}
+
+func (p * addressPools) IsEmpty() bool {
+	return p.new.IsEmpty() && p.used.IsEmpty()
+}
+
+func (p * addressPools) Get() string {
+	if !p.new.IsEmpty() {
+		return p.new.Get()
+	}
+	if !p.used.IsEmpty() {
+		return p.new.Get()
+	}
+	panic("Address pools are empty!")
+}
+
+type ConnectResult struct {
+	p *Peer
+	c *PeerConnection
+	addr string
+	err error
+}
+
+// ------------------------------------------------------------------------------------
+
 // Various I/O channels for the protocol
 type ProtocolIO struct {
-	pNew   chan PeerWrapper
+	pNew   chan ConnectResult
 	pMsgs  chan *MessageList
 	pErrs  chan PeerError
 	pConns chan *PeerConnection
@@ -29,7 +101,7 @@ type ProtocolIO struct {
 
 func NewProtocolIO(c ProtocolConfig) ProtocolIO {
 	return ProtocolIO{
-		make(chan PeerWrapper),
+		make(chan ConnectResult),
 		make(chan *MessageList, c.peersIncomingBufferSize),
 		make(chan PeerError),
 		make(chan *PeerConnection),
@@ -54,11 +126,6 @@ type ProtocolConfig struct {
 	listenAddr string
 	peerOutgoingBufferSize int
 	peersIncomingBufferSize int
-}
-
-type PeerWrapper struct {
-	p *Peer
-	c *PeerConnection
 }
 
 func StartProtocol(c ProtocolConfig) error {
@@ -105,7 +172,9 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
 	buffers := make(map[PeerIdentity]chan BufferMessage)
 	peers := make([]*Peer, 0, idealPeers)
 	isSeed := mp.IsComplete()
+	addrs := NewAddressPools()
 	tick := 0
+	attempts := 0
 
     // Define function for socket send
     toSocket := func(p *Peer, msgs []ProtocolMessage) {
@@ -127,6 +196,16 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
         }
     }
 
+	// Attempt to connect to 'ideal' peers
+	connectToPeers := func() int {
+		max := idealPeers - attempts - len(peers)
+		n := 0
+		for ; !addrs.IsEmpty() && n < max; n++ {
+			go handlePeerConnect(addrs.Get(), c, logger, io)
+		}
+		return n
+	}
+
 	for {
 
 		select {
@@ -135,41 +214,50 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
 			tick++
 
 		case r := <-io.trOut:
-			addrs := onTrackerResponse(r, len(peers))
-			for _, pa := range addrs {
-				go handlePeerConnect(pa, c, logger, io)
-			}
+			addrs.Add(r.PeerAddresses)
+			attempts += connectToPeers()
 
 		case list := <-io.pMsgs:
 			if ok, p := findPeer(list.id, peers); ok {
                 err := onProtocolMessages(p, list.msgs, toSocket, toDisk, mp)
                 if err != nil {
-                    closePeer(p, err)
+                    closePeer(p, mp, err)
+					peers = removePeer(p, peers)
+					attempts += connectToPeers()
                 }
             }
 
 		case e := <-io.pErrs:
             if ok, p := findPeer(e.id, peers); ok {
-                closePeer(p, e.err)
+                closePeer(p, mp, e.err)
+				peers = removePeer(p, peers)
+				attempts += connectToPeers()
             }
 
-		case wrapper := <-io.pNew:
+		case result := <-io.pNew:
+
+			attempts--
+			if result.err != nil {
+				addrs.Used(result.addr)
+				attempts += connectToPeers()
+				continue
+			}
 
 			// TODO: The connection has been passed here and we should hang on to it!
 
 			// Create log file & loggers
-			err, file := c.w(fmt.Sprintf("%v.log", wrapper.c.in.conn.RemoteAddr()))
+			err, file := c.w(fmt.Sprintf("%v.log", result.addr))
 			if err != nil {
 				logger.Fatalf("Can't create log file: [%v]\n", err)
 			}
 
 			// Create outgoing buffer & start connection
 			in, out := Buffer(c.peerOutgoingBufferSize)
-			wrapper.c.Start(wrapper.p.Id(), out, io.pMsgs, io.pErrs, file)
+			result.c.Start(result.p.Id(), out, io.pMsgs, io.pErrs, file)
 
 			// Store
-			peers = append(peers, wrapper.p)
-			buffers[wrapper.p.Id()] = in
+			peers = append(peers, result.p)
+			buffers[result.p.Id()] = in
 
 		case m := <-io.dOut:
             switch msg := m.(type) {
@@ -189,8 +277,14 @@ func protocolLoop(c ProtocolConfig, mp *PieceMap, io ProtocolIO, logger *log.Log
             }
 
 		case conn := <-io.pConns:
-			if len(peers) < idealPeers {
+			if idealPeers - (attempts + len(peers)) > 0 {
+				attempts++
 				go handlePeerEstablish(conn, c, logger, io, false)
+			} else {
+				err := conn.Close()
+				if err != nil {
+					logger.Printf("Failed to close connection (%v)\n%v", conn.addr, err)
+				}
 			}
 		}
 	}
@@ -219,26 +313,12 @@ func onPieceOk(index int, mp *PieceMap, toAllSockets func(ProtocolMessage), comp
     }
 }
 
-func onTrackerResponse(r *TrackerResponse, peerCount int) []PeerAddress {
+func handlePeerConnect(addr string, c ProtocolConfig, logger *log.Logger, io ProtocolIO) {
 
-	var addrs []PeerAddress
-	if peerCount < idealPeers {
-		for _, pa := range r.PeerAddresses[25:] {
-			addrs = append(addrs, pa)
-			peerCount++
-			if peerCount == idealPeers {
-				break
-			}
-		}
-	}
-	return addrs
-}
-
-func handlePeerConnect(addr PeerAddress, c ProtocolConfig, logger *log.Logger, io ProtocolIO) {
-
-	conn, err := NewConnection(addr.GetIpAndPort())
+	conn, err := NewConnection(addr)
 	if err != nil {
 		logger.Printf("Can't connect to [%v]: %v\n", addr, err)
+		io.pNew <- ConnectResult{nil, nil, addr, err}
 		return
 	}
 	handlePeerEstablish(conn, c, logger, io, true)
@@ -250,22 +330,29 @@ func handlePeerEstablish(conn *PeerConnection, c ProtocolConfig, logger *log.Log
 	id, err := conn.Establish(Handshake(c.mi.InfoHash), outgoing)
 	if err != nil {
 		logger.Printf("Can't establish connection [%v]: %v\n", conn.in.conn.RemoteAddr(), err)
-		conn.Close()
+		_ = conn.Close() // TODO: Should log?
+		io.pNew <- ConnectResult{nil, nil, conn.addr, err}
 		return
 	}
 
 	// Connected
 	logger.Printf("New Peer: %v\n", id)
-	io.pNew <- PeerWrapper{NewPeer(id, len(c.mi.Hashes)), conn}
+	io.pNew <- ConnectResult{NewPeer(id, len(c.mi.Hashes)), conn, conn.addr, nil}
 }
 
-func closePeer(peer *Peer, err error) {
+func closePeer(peer *Peer, mp *PieceMap, err error) {
+	// Return requests & decrement availability
+	mp.ReturnOffsets(peer.blocks)
+	mp.DecAll(peer.bitfield)
+}
 
-	// TODO:
-
-	// 1. Remove from peers
-	// 2. peer.Close()
-	// 3. Log errors
+func removePeer(p *Peer, peers []*Peer) []*Peer {
+	for i, pr := range peers {
+		if p.Id() == pr.Id() {
+			return append(peers[:i], peers[i+1:]...)
+		}
+	}
+	return peers
 }
 
 func findPeer(id PeerIdentity, peers []*Peer) (bool, *Peer) {

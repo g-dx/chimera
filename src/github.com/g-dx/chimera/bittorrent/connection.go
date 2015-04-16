@@ -58,6 +58,7 @@ type PeerConnection struct {
 	in     IncomingPeerConnection
 	out    OutgoingPeerConnection
 	logger *log.Logger
+	addr string
 }
 
 func NewConnection(addr string) (*PeerConnection, error) {
@@ -82,6 +83,7 @@ func createConnection(conn net.Conn) *PeerConnection {
 		close: c,
 		in:    IncomingPeerConnection{c, nil, conn, nil},
 		out:   OutgoingPeerConnection{c, nil, conn, nil},
+		addr: conn.RemoteAddr().String(),
 	}
 }
 

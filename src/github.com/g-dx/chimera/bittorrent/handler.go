@@ -54,9 +54,9 @@ func OnReceiveMessages(msgs []ProtocolMessage, p *Peer, mp *PieceMap) (error, []
 		case Uninterested: ws = onUninterested(ws)
 		case Bitfield: err, bf, ws, pm = onBitfield([]byte(m), ws, mp)
 		case Have: err, ws, pm = onHave(int(m), ws, bf, mp)
-		case Cancel: err = onCancel(m.index, m.begin, m.length)
-		case Request: err, op = onRequest(m.index, m.begin, m.length)
-		case Block: err, op = onBlock(m.index, m.begin, m.block, p.statistics, p.id)
+		case Cancel: err = onCancel(m.index, m.begin, m.length, mp)
+		case Request: err, op = onRequest(m.index, m.begin, m.length, mp, p.id)
+		case Block: err, op = onBlock(m.index, m.begin, m.block, mp, p.statistics)
 		case KeepAlive: // Nothing to do...
 		default:
 			//p.logger.Printf("Unknown protocol message: %v", m) TODO: pass a logger
@@ -106,7 +106,7 @@ func onHave(index int, ws WireState, bitfield *BitSet, mp *PieceMap) (error, Wir
 
 	// Validate
 	if !bitfield.IsValid(index) {
-		return newError("Invalid index received: %v", index), ws, nil
+		return newError("Invalid Have: %v", index), ws, nil
 	}
 
 	var msg ProtocolMessage
@@ -124,28 +124,37 @@ func onHave(index int, ws WireState, bitfield *BitSet, mp *PieceMap) (error, Wir
 	return nil, ws, msg
 }
 
-func onCancel(index, begin, length int) error {
-    // TODO: Return FilterMessage
-    // TODO: Return CancelDiskRead
+func onCancel(index, begin, length int, mp *PieceMap) error {
+
+	if !mp.IsValid(index, begin, length) {
+		return newError("Cancel Invalid: index(%v), begin(%v), len(%v)", index, begin, length)
+	}
+
+	// TODO: implement Cancel functionality for disk!
+	// TODO: Support BufferMessage cancel here...
 	return nil
 }
 
-func onRequest(index, begin, length int) (error, DiskMessage) {
+func onRequest(index, begin, length int, mp *PieceMap, id PeerIdentity) (error, DiskMessage) {
 
-	// TODO: Check request valid
-	//	p.pieceMap.IsValid()
+	// Check request valid
+	if !mp.IsValid(index, begin, length) {
+		return newError("Request Invalid: index(%v), begin(%v), len(%v)", index, begin, length), nil
+	}
 
-	// Get block message and pass to disk to fill
-	//	p.disk.Read(index, begin, p.id)
-	return nil, nil
+	// Return message to fill
+	return nil, ReadMessage{id, Block{index, begin, make([]byte, 0, length)}}
 }
 
-func onBlock(index, begin int, block []byte, s *Statistics, id PeerIdentity) (error, DiskMessage) {
-	// NOTE: Already on the way to disk...
-	// p.disk.Write(index, begin, length, p.id)
-	//	p.disk.Write(index, begin, block)
+func onBlock(index, begin int, block []byte, mp *PieceMap, s *Statistics) (error, DiskMessage) {
+
+	// Check request valid
+	if !mp.IsValid(index, begin, len(block)) {
+		return newError("Block Invalid: index(%v), begin(%v), len(%v)", index, begin, len(block)), nil
+	}
+
 	s.Download.Add(len(block))
-	return nil, ReadMessage{id, Block{index, begin, block}}
+	return nil, WriteMessage(Block{index, begin, block})
 }
 
 func onBitfield(bits []byte, ws WireState, mp *PieceMap) (error, *BitSet, WireState, ProtocolMessage) {
