@@ -60,18 +60,6 @@ func (mi *MetaInfo) TotalLength() uint64 {
 
 func NewMetaInfo(r io.Reader) (mi *MetaInfo, err error) {
 
-	// Recover from any decoding panics & return error
-	// TODO: Check if there is way push this into the bencode.go so it
-	//       can be usesd by anyone who is doing bencoding
-	defer func() {
-		if r := recover(); r != nil {
-			if _, ok := r.(runtime.Error); ok {
-				panic(r)
-			}
-			err = r.(error)
-		}
-	}()
-
 	// Decode
 	bdata, err := bencode.DecodeAsDict(r)
 	if err != nil {
